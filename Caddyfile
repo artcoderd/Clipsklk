@@ -1,0 +1,17 @@
+# Single entry point: the web app and the API share one origin, so the session
+# cookie is first-party and SSE/uploads go straight to FastAPI (no Next proxy).
+# In production put your domain here (e.g. clipeo.app) and Caddy gets HTTPS
+# automatically, or keep :80 behind Cloudflare.
+{$SITE_ADDRESS::80} {
+	request_body {
+		max_size 4GB
+	}
+	handle_path /api/* {
+		reverse_proxy api:8000 {
+			flush_interval -1
+		}
+	}
+	handle {
+		reverse_proxy web:3000
+	}
+}
