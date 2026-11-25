@@ -1,0 +1,18 @@
+# Video worker, CPU version (development, or servers without a GPU).
+# On the GPU server use Dockerfile.worker-gpu (see docker-compose.gpu.yml).
+FROM python:3.13-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 HF_HOME=/data/models
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+
+COPY requirements.txt requirements-worker.txt ./
+RUN pip install --no-cache-dir -r requirements-worker.txt
+
+COPY . .
+RUN useradd --create-home --uid 1000 clipeo \
+    && mkdir -p /data/storage /data/work /data/models && chown -R clipeo /data
+USER clipeo
+
+CMD ["celery", "-A", "app.worker.celery_app", "worker", "-Q", "video", "--loglevel=info", "--concurrency=1"]

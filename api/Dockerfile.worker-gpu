@@ -1,0 +1,25 @@
+# Video worker for NVIDIA GPUs: Whisper on CUDA (float16, large-v3) and
+# ffmpeg with NVENC. The host needs the NVIDIA driver + NVIDIA Container Toolkit.
+FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
+
+ENV DEBIAN_FRONTEND=noninteractive PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
+    HF_HOME=/data/models \
+    NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+# Ubuntu's ffmpeg is built with NVENC; the encoder library comes from the driver at runtime.
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+RUN python3 -m venv /opt/venv
+ENV PATH=/opt/venv/bin:$PATH
+WORKDIR /app
+
+COPY requirements.txt requirements-worker.txt ./
+RUN pip install --no-cache-dir -r requirements-worker.txt
+
+COPY . .
+# Same UID as the API image: both write to the shared storage volume.
+# (Ubuntu 24.04 ships a default "ubuntu" user with UID 1000; remove it first.)
+RUN userdel -r ubuntu 2>/dev/null; useradd --create-home --uid 1000 clipeo \
+    && mkdir -p /data/storage /data/work /data/models && chown -R clipeo /data
+USER clipeo
+
+CMD ["celery", "-A", "app.worker.celery_app", "worker", "-Q", "video", "--loglevel=info", "--concurrency=1"]

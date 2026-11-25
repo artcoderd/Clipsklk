@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field
 
 from app.models import JobSource, JobStatus, Role
 
@@ -87,9 +87,32 @@ class JobFromUrlIn(BaseModel):
     clip_duration: int = Field(default=45, ge=10, le=180)
 
 
+class ClipOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    job_id: uuid.UUID
+    index: int
+    start: float
+    end: float
+    score: float
+    reasons: list[str]
+    text: str
+    created_at: datetime
+
+    @computed_field
+    @property
+    def duration(self) -> float:
+        return round(self.end - self.start, 2)
+
+
+class MoreClipsIn(BaseModel):
+    count: int = Field(default=3, ge=1, le=20)
+
+
 class JobOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
+    title: str | None
     source: JobSource
     source_url: str | None
     platform: str | None

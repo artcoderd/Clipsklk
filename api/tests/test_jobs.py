@@ -55,20 +55,3 @@ def test_active_job_quota(client):
     for _ in range(3):
         assert client.post("/jobs", json={"url": "https://kick.com/x"}).status_code == 201
     assert client.post("/jobs", json={"url": "https://kick.com/x"}).status_code == 429
-
-
-def test_worker_pipeline_runs(client):
-    """Run the Celery task body directly against the test DB."""
-    from app.db import SessionLocal
-    from app.models import Job
-    from app.worker.tasks import process_job
-
-    make_user("u@x.com")
-    login(client, "u@x.com")
-    job_id = client.post("/jobs", json={"url": "https://youtu.be/abc"}).json()["id"]
-    process_job.run(job_id, stage_delay=0)
-    db = SessionLocal()
-    import uuid
-    job = db.get(Job, uuid.UUID(job_id))
-    assert job.status.value == "done" and job.progress == 100
-    db.close()

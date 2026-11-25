@@ -38,21 +38,21 @@ services:
       redis: { condition: service_healthy }
 
   worker:
-    build: ./api
+    build:
+      context: ./api
+      dockerfile: Dockerfile.worker
     restart: unless-stopped
     command: celery -A app.worker.celery_app worker -Q video --loglevel=info --concurrency=1
     env_file: .env
     environment: *backend-env
     volumes:
       - storage:/data/storage
+      - work:/data/work
+      - models:/data/models      # Whisper models, downloaded once
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
-    # Phase 2+: on the GPU server, uncomment to give the worker the NVIDIA GPU.
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices: [{ driver: nvidia, count: 1, capabilities: [gpu] }]
+    # On the GPU server: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 
   web:
     build: ./web
@@ -72,6 +72,8 @@ services:
     depends_on: [web, api]
 
 volumes:
+  work:
+  models:
   pgdata:
   redisdata:
   storage:

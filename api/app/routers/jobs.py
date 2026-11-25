@@ -13,10 +13,10 @@ from app import activity, events
 from app.config import get_settings
 from app.db import get_db
 from app.deps import get_current_user
-from app.models import Job, JobSource, JobStatus, User
+from app.models import Clip, Job, JobSource, JobStatus, User
 from app.platforms import detect_platform
 from app.redis_client import get_redis
-from app.schemas import JobFromUrlIn, JobOut
+from app.schemas import ClipOut, JobFromUrlIn, JobOut, MoreClipsIn
 from app.storage import StorageError, get_storage
 from app.worker import enqueue_job
 
@@ -98,6 +98,33 @@ def get_job(job_id: uuid.UUID, user: User = Depends(get_current_user), db: Sessi
     return _own_job(db, user, job_id)
 
 
+@router.get("/{job_id}/clips", response_model=list[ClipOut])
+def list_clips(job_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    _own_job(db, user, job_id)
+    return db.scalars(select(Clip).where(Clip.job_id == job_id, Clip.storage_key.is_not(None))
+                      .order_by(Clip.score.desc(), Clip.index)).all()
+
+
+@router.post("/{job_id}/more", response_model=JobOut)
+def more_clips(job_id: uuid.UUID, data: MoreClipsIn, request: Request,
+               user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """More clips from the same video: reuses the stored source, transcript and
+    analysis, so nothing is downloaded or transcribed again."""
+    job = _own_job(db, user, job_id)
+    if job.status in (JobStatus.queued, JobStatus.running):
+        raise HTTPException(status.HTTP_409_CONFLICT, "job_busy")
+    if job.asset_id is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "job_not_ready")
+    _check_quota(db, user)
+    done = db.scalar(select(func.count()).select_from(Clip).where(Clip.job_id == job.id))
+    job.clip_count = done + data.count
+    job.status, job.stage, job.progress, job.error = JobStatus.queued, "queued", 75, None
+    activity.log(db, "job_more_clips", user.id, request, job=str(job.id), count=data.count)
+    db.commit()
+    enqueue_job(job.id)
+    return job
+
+
 @router.get("/{job_id}/events")
 async def job_events(job_id: uuid.UUID, request: Request, user: User = Depends(get_current_user),
                      db: Session = Depends(get_db)):
@@ -109,10 +136,11 @@ async def job_events(job_id: uuid.UUID, request: Request, user: User = Depends(g
     db.expire_all()
     snapshot = JobOut.model_validate(db.get(Job, job_id)).model_dump(mode="json")
     db.close()
+    first = json.dumps({"type": "job", "job": snapshot})
 
     async def stream():
         try:
-            yield f"data: {json.dumps(snapshot)}\n\n"
+            yield f"data: {first}\n\n"
             if snapshot["status"] in FINAL:
                 return
             idle = 0.0
@@ -121,7 +149,7 @@ async def job_events(job_id: uuid.UUID, request: Request, user: User = Depends(g
                 if msg and msg.get("type") == "message":
                     idle = 0.0
                     yield f"data: {msg['data']}\n\n"
-                    if json.loads(msg["data"]).get("status") in FINAL:
+                    if json.loads(msg["data"]).get("job", {}).get("status") in FINAL:
                         return
                 else:
                     idle += 1.0

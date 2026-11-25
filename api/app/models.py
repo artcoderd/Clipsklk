@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -67,6 +67,28 @@ class Invitation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class MediaAsset(Base):
+    """A source video stored once. Every job/clip request for the same link (per
+    user) reuses it, together with its transcript and audio analysis."""
+    __tablename__ = "media_assets"
+    __table_args__ = (UniqueConstraint("user_id", "source_key", name="uq_asset_user_source"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    # Canonical URL for links, "upload:<job id>" for uploads.
+    source_key: Mapped[str] = mapped_column(String(600))
+    title: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    storage_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    duration: Mapped[float | None] = mapped_column(Float, nullable=True)
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    has_video: Mapped[bool] = mapped_column(default=True)
+    language: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    transcript_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    analysis_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Job(Base):
     __tablename__ = "jobs"
 
@@ -77,6 +99,8 @@ class Job(Base):
     platform: Mapped[str | None] = mapped_column(String(32), nullable=True)
     original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     storage_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    asset_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("media_assets.id"), nullable=True, index=True)
+    title: Mapped[str | None] = mapped_column(String(300), nullable=True)
     clip_count: Mapped[int] = mapped_column(Integer, default=5)
     clip_duration: Mapped[int] = mapped_column(Integer, default=45)
     status: Mapped[JobStatus] = mapped_column(Enum(JobStatus, name="job_status"), default=JobStatus.queued)
@@ -87,6 +111,27 @@ class Job(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     user: Mapped[User] = relationship(back_populates="jobs")
+    asset: Mapped[MediaAsset | None] = relationship()
+    clips: Mapped[list["Clip"]] = relationship(back_populates="job", order_by="Clip.index")
+
+
+class Clip(Base):
+    __tablename__ = "clips"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    index: Mapped[int] = mapped_column(Integer)
+    start: Mapped[float] = mapped_column(Float)
+    end: Mapped[float] = mapped_column(Float)
+    score: Mapped[float] = mapped_column(Float, default=0.0)
+    reasons: Mapped[list] = mapped_column(JSON, default=list)
+    text: Mapped[str] = mapped_column(Text, default="")
+    storage_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    thumbnail_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    job: Mapped[Job] = relationship(back_populates="clips")
 
 
 class ActivityLog(Base):

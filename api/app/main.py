@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 
 from app.config import get_settings
-from app.routers import admin, auth, jobs
+from app.routers import admin, auth, clips, jobs
 
 settings = get_settings()
 
@@ -15,6 +15,7 @@ app = FastAPI(
 
 app.include_router(auth.router)
 app.include_router(jobs.router)
+app.include_router(clips.router)
 app.include_router(admin.router)
 
 

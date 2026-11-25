@@ -11,4 +11,7 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,   # GPU jobs are long; take one at a time
     task_track_started=True,
     task_routes={"app.worker.tasks.process_job": {"queue": "video"}},
+    task_time_limit=8 * 3600,        # hard stop for runaway jobs (sources are capped at 6 h)
+    broker_transport_options={"visibility_timeout": 9 * 3600},  # must exceed the longest job
+    worker_max_tasks_per_child=50,
 )

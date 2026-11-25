@@ -4,6 +4,7 @@ import { PLATFORM_LABELS, STAGE_LABELS, type Job } from "@/lib/api";
 import { ProgressBar } from "./ui";
 
 export function jobTitle(job: Job) {
+  if (job.title) return job.title;
   if (job.source === "upload") return job.original_filename ?? "Archivo";
   return job.source_url ?? "Video";
 }

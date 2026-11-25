@@ -1,0 +1,14 @@
+# GPU server override:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+services:
+  worker:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.worker-gpu
+    environment:
+      WHISPER_DEVICE: cuda
+      VIDEO_ENCODER: h264_nvenc
+    deploy:
+      resources:
+        reservations:
+          devices: [{ driver: nvidia, count: 1, capabilities: [gpu, video, compute, utility] }]

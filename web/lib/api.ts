@@ -15,6 +15,7 @@ export type JobStatus = "queued" | "running" | "done" | "failed" | "canceled";
 
 export type Job = {
   id: string;
+  title: string | null;
   source: "url" | "upload";
   source_url: string | null;
   platform: string | null;
@@ -28,6 +29,21 @@ export type Job = {
   created_at: string;
   updated_at: string;
 };
+
+export type Clip = {
+  id: string;
+  job_id: string;
+  index: number;
+  start: number;
+  end: number;
+  duration: number;
+  score: number;
+  reasons: string[];
+  text: string;
+  created_at: string;
+};
+
+export type JobEvent = { type: "job"; job: Job } | { type: "clip"; clip: Clip };
 
 export class ApiError extends Error {
   constructor(public status: number, public code: string) {
@@ -54,6 +70,25 @@ const MESSAGES: Record<string, string> = {
   cannot_invite_owner: "No se puede invitar a otro dueño.",
   forbidden: "No tienes permiso.",
   not_authenticated: "Inicia sesión para continuar.",
+  job_busy: "Este proyecto todavía se está procesando.",
+  job_not_ready: "Espera a que termine el primer procesamiento.",
+};
+
+/** Why a job failed (codes set by the worker). */
+export const JOB_ERRORS: Record<string, string> = {
+  source_blocked:
+    "La plataforma bloqueó la descarga desde nuestro servidor. Descarga el video y súbelo como archivo.",
+  source_private: "El video es privado, para miembros o con restricción de edad. Súbelo como archivo.",
+  source_unavailable: "El video no existe o fue eliminado.",
+  source_is_live: "Ese link es un directo en curso. El modo en vivo llega pronto; mientras, usa la grabación.",
+  source_too_long: "El video es demasiado largo (máximo 6 horas).",
+  unsupported_url: "Ese link no se puede descargar (¿es una lista de reproducción?).",
+  download_failed: "No pudimos descargar el video. Inténtalo de nuevo o súbelo como archivo.",
+  invalid_media: "El archivo no es un video o audio válido.",
+  no_audio: "El video no tiene audio, así que no podemos encontrar momentos.",
+  no_moments: "No encontramos momentos para recortar.",
+  ffmpeg_failed: "Falló el corte del video. Inténtalo de nuevo.",
+  processing_failed: "Algo falló al procesar el video. Inténtalo de nuevo.",
 };
 
 export function errorMessage(err: unknown): string {
@@ -112,12 +147,29 @@ export const STAGE_LABELS: Record<string, string> = {
   queued: "En cola",
   starting: "Preparando",
   fetching: "Descargando video",
-  transcribing: "Transcribiendo",
-  detecting_moments: "Buscando los mejores momentos",
+  extracting_audio: "Extrayendo audio",
+  transcribing: "Transcribiendo palabra por palabra",
+  detecting_moments: "Buscando risas, gritos y picos",
   cutting: "Cortando clips",
   done: "Listo",
   failed: "Error",
 };
+
+export const REASON_LABELS: Record<string, string> = {
+  risas: "😂 Risas",
+  gritos: "😱 Gritos",
+  volumen: "🔊 Volumen",
+  "emoción": "🔥 Emoción",
+  "conversación": "💬 Conversación",
+  "video completo": "🎬 Completo",
+};
+
+export function fmtTime(s: number): string {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = Math.floor(s % 60).toString().padStart(2, "0");
+  return h ? `${h}:${m.toString().padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+}
 
 export const PLATFORM_LABELS: Record<string, string> = {
   youtube: "YouTube",
