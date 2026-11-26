@@ -59,6 +59,11 @@ def _env(monkeypatch):
     queued = []
     monkeypatch.setattr("app.routers.jobs.enqueue_job", lambda job_id: queued.append(job_id))
     monkeypatch.setattr("app.routers.lives.enqueue_live", lambda live_id: queued.append(("live", live_id)))
+    # No real Celery/Redis in tests: every other send is a no-op unless a test records it.
+    monkeypatch.setattr("app.worker._send", lambda name, arg: None)
+    for name in ("app.routers.clips.enqueue_rerender", "app.routers.clips.enqueue_cover",
+                 "app.routers.editor.enqueue_proxy", "app.routers.social.enqueue_publish"):
+        monkeypatch.setattr(name, lambda *a: None)
     yield queued
 
 
