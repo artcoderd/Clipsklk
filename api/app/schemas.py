@@ -114,11 +114,17 @@ class RenderOptions(BaseModel):
     person: int | None = Field(default=None, ge=0)
 
 
+class AIOptions(BaseModel):
+    use_ai: bool | None = None                       # None = the user's preference
+    rules: str = Field(default="", max_length=2000)  # extra rules for this project only
+
+
 class JobFromUrlIn(BaseModel):
     url: str = Field(max_length=2048)
     clip_count: int = Field(default=5, ge=1, le=30)
     clip_duration: int = Field(default=45, ge=10, le=180)
     render: RenderOptions = RenderOptions()
+    ai: AIOptions = AIOptions()
 
 
 _HEX = r"^#[0-9a-fA-F]{6}$"
@@ -179,6 +185,11 @@ class ClipOut(BaseModel):
     render_status: str
     version: int
     offset: float
+    title: str
+    caption: str
+    hashtags: list[str]
+    ai_provider: str | None
+    cover_rev: str | None
     created_at: datetime
 
     @computed_field
@@ -204,6 +215,8 @@ class JobOut(BaseModel):
     clip_duration: int
     render: dict
     focus_person: int | None
+    ai: dict
+    ai_status: str | None
     status: JobStatus
     progress: int
     stage: str
@@ -215,6 +228,8 @@ class JobOut(BaseModel):
 class LiveIn(BaseModel):
     url: str = Field(max_length=2048)
     auto_clips: bool = True
+    ai_review: bool = True
+    ai: AIOptions = AIOptions()
     sensitivity: Literal["low", "normal", "high"] = "normal"
     clip_duration: int = Field(default=45, ge=15, le=180)
     final_clips: int = Field(default=5, ge=0, le=30)
@@ -223,6 +238,7 @@ class LiveIn(BaseModel):
 
 class LiveUpdateIn(BaseModel):
     auto_clips: bool | None = None
+    ai_review: bool | None = None
     sensitivity: Literal["low", "normal", "high"] | None = None
 
 
@@ -238,6 +254,7 @@ class LiveOut(BaseModel):
     status: str
     chat_status: str
     auto_clips: bool
+    ai_review: bool
     sensitivity: str
     clip_duration: int
     final_clips: int
@@ -253,3 +270,17 @@ class LiveOut(BaseModel):
 class PushSubscriptionIn(BaseModel):
     endpoint: str = Field(max_length=2048)
     keys: dict[str, str]
+
+
+class AIPrefsIO(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    use_ai: bool = True
+    provider: Literal["anthropic", "openai", "gemini"] | None = None
+    rules: str = Field(default="", max_length=2000)
+    hashtags: int = Field(default=5, ge=0, le=15)
+
+
+class ClipTextIn(BaseModel):
+    title: str | None = Field(default=None, max_length=120)
+    caption: str | None = Field(default=None, max_length=2200)
+    hashtags: list[str] | None = Field(default=None, max_length=30)

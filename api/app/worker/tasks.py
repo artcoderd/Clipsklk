@@ -25,7 +25,9 @@ from app.db import SessionLocal
 from app.media import PipelineError, ffmpeg
 from app.media.analysis import analyze
 from app.media.download import download
-from app.media.moments import select_moments
+from app.ai.prefs import record as record_ai, resolve as resolve_ai
+from app.ai.select import choose
+from app.media.cover import make_cover
 from app.media.render import RenderSettings, render_clip
 from app.media.subtitles import PRESETS
 from app.media.transcribe import transcribe
@@ -255,21 +257,41 @@ def _render_one(db, clip: Clip, asset: MediaAsset, src: Path, vision: dict | Non
     base = f"users/{clip.user_id}/clips/{clip.id}/v{version}"
     out, thumb = work / f"{clip.id}-v{version}.mp4", work / f"{clip.id}-v{version}.jpg"
     layout = render_clip(src, clip.start, clip.end, out, settings, meta, vision, transcript, on_progress)
-    ffmpeg.thumbnail(out, (clip.end - clip.start) * 0.6, thumb)
+    dur = clip.end - clip.start
+    at = clip.cover_t if clip.cover_t is not None and 0 <= clip.cover_t < dur else dur * 0.6
+    ffmpeg.thumbnail(out, at, thumb)
+    cover = work / f"{clip.id}-v{version}-cover.jpg"
+    _cover_from_source(src, clip, at, settings, meta, vision, work, cover)
     storage.put_file(f"{base}.mp4", out, "video/mp4")
     storage.put_file(f"{base}.jpg", thumb, "image/jpeg")
-    out.unlink(missing_ok=True)
-    thumb.unlink(missing_ok=True)
-    old = (clip.storage_key, clip.thumbnail_key)
-    clip.storage_key, clip.thumbnail_key = f"{base}.mp4", f"{base}.jpg"
+    storage.put_file(f"{base}-cover.jpg", cover, "image/jpeg")
+    for f in (out, thumb, cover):
+        f.unlink(missing_ok=True)
+    old = (clip.storage_key, clip.thumbnail_key, clip.cover_key)
+    clip.storage_key, clip.thumbnail_key, clip.cover_key = f"{base}.mp4", f"{base}.jpg", f"{base}-cover.jpg"
     clip.layout, clip.version, clip.render_status = layout, version, "ready"
     db.commit()
     for key in old:   # previous version is no longer referenced
-        if key and key not in (clip.storage_key, clip.thumbnail_key):
+        if key and key not in (clip.storage_key, clip.thumbnail_key, clip.cover_key):
             try:
                 storage.delete_prefix(key)
             except Exception:
                 log.warning("could not delete %s", key)
+
+
+def _cover_from_source(src: Path, clip: Clip, at: float, settings: RenderSettings, meta: dict,
+                       vision: dict | None, work: Path, dest: Path) -> None:
+    """The cover frame, framed like the clip but without subtitles (only the title goes on it)."""
+    from dataclasses import replace
+
+    frame = work / f"{clip.id}-coverframe.mp4"
+    t = clip.start + at
+    plain = replace(settings, subtitles=False, music_path=None)
+    try:
+        render_clip(src, t, t + 0.2, frame, plain, meta, vision, None)
+        make_cover(frame, 0.0, clip.title, settings.format, dest, settings.style)
+    finally:
+        frame.unlink(missing_ok=True)
 
 
 def _make_clips(db, job: Job, asset: MediaAsset, prog: Progress, work: Path) -> None:
@@ -286,8 +308,16 @@ def _make_clips(db, job: Job, asset: MediaAsset, prog: Progress, work: Path) -> 
         focus = person_speaking_seconds(vision, transcript, int(asset.duration) + 1).get(job.focus_person)
         if focus is None:
             raise PipelineError("person_not_found")
-    moments = select_moments(analysis, transcript, missing, job.clip_duration, asset.duration,
-                             exclude=[(c.start, c.end) for c in existing], focus=focus)
+    provider, rules, hashtags = resolve_ai(db, job.user_id, job.ai)
+    if provider:
+        prog.push(stage="ai_selecting")
+    moments, ai_result, ai_failure = choose(provider, transcript, analysis, missing, job.clip_duration,
+                                            asset.duration, [(c.start, c.end) for c in existing], rules,
+                                            hashtags, focus=focus)
+    record_ai(db, job.user_id, ai_result, "select")
+    job.ai_status = (f"ai:{ai_result.provider}" if ai_result else f"fallback:{ai_failure}" if ai_failure
+                     else "off" if not provider else "fallback:person_filter")
+    db.commit()
     if not moments and not existing:
         raise PipelineError("no_moments")
     if not moments and focus is not None:
@@ -303,7 +333,9 @@ def _make_clips(db, job: Job, asset: MediaAsset, prog: Progress, work: Path) -> 
     for i, m in enumerate(moments):
         clip = Clip(job_id=job.id, user_id=job.user_id, index=next_index + i, start=m.start, end=m.end,
                     score=m.score, reasons=m.reasons, text=m.text[:5000], render=options,
-                    render_status="rendering", version=0)
+                    render_status="rendering", version=0, title=m.title[:120], caption=m.caption,
+                    hashtags=m.hashtags, cover_t=m.cover_t,
+                    ai_provider=ai_result.provider if (m.ai and ai_result) else None)
         db.add(clip)
         db.commit()
         _render_one(db, clip, asset, src, vision, transcript, work,
@@ -449,14 +481,17 @@ def make_live_clip(self, clip_id: str) -> None:
         meta = ffmpeg.probe(src)
         asset.duration, asset.width, asset.height, asset.has_video, asset.fps = (
             meta["duration"], meta["width"], meta["height"], meta["has_video"], meta["fps"])
-        wav = work / "audio.wav"
-        ffmpeg.extract_audio(src, wav, meta["duration"])
-        transcript = transcribe(wav, meta["duration"])
         base = f"users/{clip.user_id}/assets/{asset.id}"
-        _save_json(f"{base}/transcript.json.gz", transcript)
-        asset.transcript_key = f"{base}/transcript.json.gz"
-        vision = None
-        if meta["has_video"]:
+        if asset.transcript_key:   # the AI review already transcribed this stretch
+            transcript = _load_json(asset.transcript_key, work)
+        else:
+            wav = work / "audio.wav"
+            ffmpeg.extract_audio(src, wav, meta["duration"])
+            transcript = transcribe(wav, meta["duration"])
+            _save_json(f"{base}/transcript.json.gz", transcript)
+            asset.transcript_key = f"{base}/transcript.json.gz"
+        vision = _load_json(asset.vision_key, work) if asset.vision_key else None
+        if meta["has_video"] and vision is None:
             vision = analyze_video(src, meta["width"], meta["height"], meta["duration"],
                                    hwaccel=ffmpeg.video_encoder() == "h264_nvenc")
             _save_json(f"{base}/vision.json.gz", vision)
@@ -470,6 +505,8 @@ def make_live_clip(self, clip_id: str) -> None:
             clip.start, clip.end = round(max(0.0, a), 2), round(min(meta["duration"], b), 2)
         clip.text = " ".join(w["word"].strip() for sg in transcript["segments"] for w in (sg.get("words") or [])
                              if clip.start <= w["start"] < clip.end)[:5000]
+        if not clip.title:
+            _caption_clip(db, clip)
         db.commit()
         _render_one(db, clip, asset, src, vision, transcript, work)
         live = db.query(LiveSession).filter(LiveSession.job_id == clip.job_id).first()
@@ -491,3 +528,121 @@ def make_live_clip(self, clip_id: str) -> None:
                 live_publish(live.id, "clip", payload)
         shutil.rmtree(work, ignore_errors=True)
         db.close()
+
+
+def _caption_clip(db, clip: Clip) -> None:
+    """Title, caption and hashtags: AI when enabled, the clip's own words otherwise."""
+    from app.ai import AIError
+    from app.ai.captions import ai_caption, heuristic_caption
+
+    job = db.get(Job, clip.job_id)
+    provider, rules, hashtags = resolve_ai(db, clip.user_id, job.ai if job else None)
+    if provider and clip.text:
+        try:
+            cap, result = ai_caption(provider, clip.text, rules, hashtags)
+            record_ai(db, clip.user_id, result, "caption")
+            clip.title, clip.caption, clip.hashtags = cap.title[:120], cap.caption, cap.hashtags
+            clip.ai_provider = result.provider
+            return
+        except AIError as e:
+            log.info("AI caption failed (%s); using the clip's words", e.code)
+    clip.title, clip.caption, clip.hashtags = heuristic_caption(clip.text, hashtags)
+
+
+@celery_app.task(name="app.worker.tasks.refresh_cover", bind=True)
+def refresh_cover(self, clip_id: str) -> None:
+    """Redraws the cover after the user edits the title (no re-render)."""
+    db = SessionLocal()
+    work = Path(get_settings().work_dir) / f"cover-{clip_id}"
+    try:
+        clip = db.get(Clip, uuid.UUID(clip_id))
+        if clip is None or not clip.storage_key:
+            return
+        work.mkdir(parents=True, exist_ok=True)
+        storage = get_storage()
+        job = db.get(Job, clip.job_id)
+        asset = db.get(MediaAsset, clip.asset_id or job.asset_id)
+        src = _source_file(asset, work)
+        settings = resolve_settings(db, clip.user_id, clip.render, work)
+        meta = {"width": asset.width, "height": asset.height, "fps": asset.fps, "has_video": asset.has_video}
+        dur = clip.end - clip.start
+        at = clip.cover_t if clip.cover_t is not None and 0 <= clip.cover_t < dur else dur * 0.6
+        out = work / "cover.jpg"
+        _cover_from_source(src, clip, at, settings, meta, _load_json(asset.vision_key, work), work, out)
+        key = f"users/{clip.user_id}/clips/{clip.id}/v{clip.version}-cover-{uuid.uuid4().hex[:6]}.jpg"
+        storage.put_file(key, out, "image/jpeg")
+        old, clip.cover_key = clip.cover_key, key
+        db.commit()
+        if old and old != key:
+            storage.delete_prefix(old)
+        events.publish(clip.job_id, "clip", ClipOut.model_validate(clip).model_dump(mode="json"))
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+        db.close()
+
+
+@celery_app.task(name="app.worker.tasks.live_ai_review", bind=True)
+def live_ai_review(self, session_id: str, asset_id: str, offset: float) -> None:
+    """Live: the AI reads the last few minutes and proposes a clip if there is
+    a genuinely good moment (it may propose none)."""
+    from app.ai.select import ai_select
+    from app.models import LiveSession
+
+    db = SessionLocal()
+    work = Path(get_settings().work_dir) / f"review-{asset_id}"
+    made = []
+    try:
+        live = db.get(LiveSession, uuid.UUID(session_id))
+        asset = db.get(MediaAsset, uuid.UUID(asset_id))
+        if live is None or asset is None:
+            return
+        provider, rules, hashtags = resolve_ai(db, live.user_id, (db.get(Job, live.job_id).ai or {}))
+        if not provider:
+            return
+        work.mkdir(parents=True, exist_ok=True)
+        src = _source_file(asset, work)
+        meta = ffmpeg.probe(src)
+        asset.duration, asset.width, asset.height, asset.has_video, asset.fps = (
+            meta["duration"], meta["width"], meta["height"], meta["has_video"], meta["fps"])
+        wav = work / "audio.wav"
+        ffmpeg.extract_audio(src, wav, meta["duration"])
+        transcript = transcribe(wav, meta["duration"])
+        base = f"users/{live.user_id}/assets/{asset.id}"
+        _save_json(f"{base}/transcript.json.gz", transcript)
+        asset.transcript_key = f"{base}/transcript.json.gz"
+        analysis = analyze(wav)
+        # Ranges already clipped in this broadcast, relative to this window.
+        existing = [(c.offset + c.start - offset, c.offset + c.end - offset)
+                    for c in db.query(Clip).filter(Clip.job_id == live.job_id).all()]
+        exclude = [(a, b) for a, b in existing if b > 0 and a < meta["duration"]]
+        only_good = rules + ("\n" if rules else "") + (
+            "Directo en vivo: propone como mucho 1 clip y solo si hay un momento realmente bueno; "
+            "si no, devuelve la lista vacía.")
+        try:
+            moments, result = ai_select(provider, transcript, analysis, 1, live.clip_duration, meta["duration"],
+                                        exclude, only_good, hashtags)
+            record_ai(db, live.user_id, result, "live")
+        except Exception as e:
+            log.info("live AI review skipped: %s", e)
+            moments = []
+        job = db.get(Job, live.job_id)
+        for m in moments:
+            index = db.query(Clip).filter(Clip.job_id == job.id).count() + 1
+            clip = Clip(job_id=job.id, user_id=live.user_id, index=index, asset_id=asset.id, offset=offset,
+                        start=m.start, end=m.end, score=m.score, reasons=m.reasons, text=m.text[:5000],
+                        render=dict(job.render or {}), render_status="rendering", version=0, title=m.title,
+                        caption=m.caption, hashtags=m.hashtags, cover_t=m.cover_t, ai_provider=provider)
+            db.add(clip)
+            job.clip_count = index
+            made.append(clip)
+        db.commit()
+        if not made:   # nothing worth a clip: drop this stretch to save storage
+            get_storage().delete_prefix(asset.storage_key)
+            get_storage().delete_prefix(base)
+            db.delete(asset)
+            db.commit()
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+        db.close()
+    for clip in made:
+        make_live_clip.run(str(clip.id))

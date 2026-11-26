@@ -10,9 +10,9 @@ from app.deps import get_current_user
 from app import activity
 from app.models import Clip, Job, MediaAsset, User
 from app.render_options import validate_render
-from app.schemas import ClipOut, RenderOptions
+from app.schemas import ClipOut, ClipTextIn, RenderOptions
 from app.storage import get_storage
-from app.worker import enqueue_rerender
+from app.worker import enqueue_cover, enqueue_rerender
 
 router = APIRouter(prefix="/clips", tags=["clips"])
 
@@ -30,7 +30,7 @@ def _download_name(db: Session, clip: Clip) -> str:
     return f"{base.strip('-')[:60] or 'clipeo'}-clip{clip.index}.mp4"
 
 
-def _serve(key: str, media_type: str, download_name: str | None = None):
+def _serve(key: str, media_type: str, download_name: str | None = None, cache: str = "private, max-age=3600"):
     storage = get_storage()
     url = storage.url(key, download_name)
     if url:  # S3/R2: the browser fetches straight from the bucket/CDN (presigned, expiring)
@@ -41,7 +41,7 @@ def _serve(key: str, media_type: str, download_name: str | None = None):
     # FileResponse supports HTTP Range, so the player can seek and iOS can stream.
     return FileResponse(path, media_type=media_type, filename=download_name,
                         content_disposition_type="attachment" if download_name else "inline",
-                        headers={"Cache-Control": "private, max-age=3600"})
+                        headers={"Cache-Control": cache})
 
 
 @router.get("/{clip_id}/video")
@@ -81,4 +81,61 @@ def rerender(clip_id: uuid.UUID, opts: RenderOptions, request: Request, user: Us
     activity.log(db, "clip_rerender", user.id, request, clip=str(clip.id))
     db.commit()
     enqueue_rerender(clip.id)
+    return clip
+
+
+@router.get("/{clip_id}/cover")
+def clip_cover(clip_id: uuid.UUID, download: bool = False, user: User = Depends(get_current_user),
+               db: Session = Depends(get_db)):
+    clip = _own_clip(db, user, clip_id)
+    if not clip.cover_key:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not_found")
+    name = _download_name(db, clip).replace(".mp4", "-portada.jpg") if download else None
+    # The cover changes when the title is edited: always revalidate (cheap, ETag).
+    return _serve(clip.cover_key, "image/jpeg", name, cache="private, no-cache")
+
+
+@router.patch("/{clip_id}", response_model=ClipOut)
+def edit_text(clip_id: uuid.UUID, data: ClipTextIn, user: User = Depends(get_current_user),
+              db: Session = Depends(get_db)):
+    """Edit the cover title, caption or hashtags. A new title redraws the cover."""
+    from app.ai.captions import clean_tags
+
+    clip = _own_clip(db, user, clip_id)
+    title_changed = data.title is not None and data.title.strip() != clip.title
+    if data.title is not None:
+        clip.title = data.title.strip()
+    if data.caption is not None:
+        clip.caption = data.caption.strip()
+    if data.hashtags is not None:
+        clip.hashtags = clean_tags(data.hashtags, 30)
+    db.commit()
+    if title_changed and clip.render_status == "ready":
+        enqueue_cover(clip.id)
+    return clip
+
+
+@router.post("/{clip_id}/caption", response_model=ClipOut)
+def regenerate_caption(clip_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Ask the AI for another title/caption/hashtags (only the clip's words are sent)."""
+    from app.ai import AIError
+    from app.ai.captions import ai_caption
+    from app.ai.prefs import record, resolve
+
+    clip = _own_clip(db, user, clip_id)
+    job = db.get(Job, clip.job_id)
+    provider, rules, hashtags = resolve(db, user.id, {**(job.ai or {}), "use_ai": True} if job else {"use_ai": True})
+    if not provider:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "ai_not_configured")
+    if not clip.text.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "no_text")
+    try:
+        cap, result = ai_caption(provider, clip.text, rules, hashtags)
+    except AIError as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, e.code)
+    record(db, user.id, result, "caption")
+    clip.title, clip.caption, clip.hashtags, clip.ai_provider = cap.title[:120], cap.caption, cap.hashtags, provider
+    db.commit()
+    if clip.render_status == "ready":
+        enqueue_cover(clip.id)
     return clip

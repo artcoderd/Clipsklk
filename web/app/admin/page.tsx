@@ -18,7 +18,8 @@ type Invitation = {
   link?: string;
 };
 type Activity = { id: number; user_id: string | null; action: string; detail: Record<string, unknown>; ip: string | null; created_at: string };
-type Stats = { users: number; active_jobs: number; jobs_total: number };
+type AIUse = { provider: string; model: string; calls: number; input_tokens: number; output_tokens: number; cached_tokens: number };
+type Stats = { users: number; active_jobs: number; jobs_total: number; ai_usage_30d: AIUse[] };
 
 const ROLE_LABEL: Record<Role, string> = { owner: "Dueño", admin: "Administrador", user: "Usuario" };
 const fmt = (d: string) => new Date(d).toLocaleString("es", { dateStyle: "short", timeStyle: "short" });
@@ -172,6 +173,24 @@ export default function AdminPage() {
             </Card>
           ))}
         </div>
+      )}
+
+      {stats && stats.ai_usage_30d.length > 0 && (
+        <Card className="mb-6">
+          <h2 className="mb-3 text-lg font-semibold">Uso de IA (30 días)</h2>
+          <ul className="space-y-2 text-sm">
+            {stats.ai_usage_30d.map((u) => (
+              <li key={u.provider + u.model} className="flex flex-wrap justify-between gap-2">
+                <span>{u.model} <span className="text-white/40">· {u.calls} llamadas</span></span>
+                <span className="text-white/60">
+                  {(u.input_tokens / 1000).toFixed(1)}k entrada ({(u.cached_tokens / 1000).toFixed(1)}k de caché) ·{" "}
+                  {(u.output_tokens / 1000).toFixed(1)}k salida
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-xs text-white/40">Multiplica por el precio por millón de tokens de tu proveedor para estimar el costo.</p>
+        </Card>
       )}
 
       <Card className="mb-6 space-y-4">

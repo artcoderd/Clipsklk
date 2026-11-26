@@ -72,10 +72,11 @@ def start_live(data: LiveIn, request: Request, user: User = Depends(get_current_
     render = validate_render(db, user.id, data.render)
     job = Job(user_id=user.id, source=JobSource.live, source_url=url, platform=platform, title="Directo",
               clip_count=0, clip_duration=data.clip_duration, render=render, status=JobStatus.running,
-              stage="live", progress=0)
+              stage="live", progress=0, ai=data.ai.model_dump())
     db.add(job)
     db.flush()
     live = LiveSession(user_id=user.id, url=url, platform=platform, auto_clips=data.auto_clips,
+                       ai_review=data.ai_review,
                        sensitivity=data.sensitivity, clip_duration=data.clip_duration,
                        final_clips=data.final_clips, render=render, job_id=job.id,
                        chat_status="none")
@@ -119,6 +120,8 @@ def update_live(live_id: uuid.UUID, data: LiveUpdateIn, user: User = Depends(get
         live.auto_clips = cmd["auto_clips"] = data.auto_clips
     if data.sensitivity is not None:
         live.sensitivity = cmd["sensitivity"] = data.sensitivity
+    if data.ai_review is not None:
+        live.ai_review = data.ai_review   # takes effect on the next start (the controller reads it once)
     db.commit()
     if live.status in ACTIVE:
         _command(live.id, cmd)

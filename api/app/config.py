@@ -60,6 +60,17 @@ class Settings(BaseSettings):
     twitch_irc_port: int = 6697
     twitch_irc_tls: bool = True
 
+    # AI clip selection (only the transcript text is sent). Keys are secrets: .env only.
+    ai_provider: str = "anthropic"          # default provider: anthropic | openai | gemini
+    anthropic_api_key: str | None = None
+    openai_api_key: str | None = None
+    gemini_api_key: str | None = None
+    ai_model_anthropic: str = "claude-opus-5-5"
+    ai_model_openai: str = "gpt-5"
+    ai_model_gemini: str = "gemini-2.5-pro"
+    ai_effort: str = "medium"               # Claude: low | medium | high
+    live_ai_review_minutes: float = 5.0     # live: AI looks at the last minutes this often
+
     # Web push (generate with: python -m app.cli vapid-keys)
     vapid_public_key: str | None = None
     vapid_private_key: str | None = None

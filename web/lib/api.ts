@@ -24,6 +24,8 @@ export type Job = {
   clip_duration: number;
   render: Partial<RenderOptions>;
   focus_person: number | null;
+  ai: { use_ai?: boolean | null; rules?: string };
+  ai_status: string | null;
   status: JobStatus;
   progress: number;
   stage: string;
@@ -78,6 +80,33 @@ export type StyleConfig = {
   position: "bottom" | "middle" | "top";
 };
 
+export type AIProvider = "anthropic" | "openai" | "gemini";
+export type AIStatus = { available: { id: AIProvider; label: string; model: string }[]; default: AIProvider | null; viral_rules: string };
+export type AIPrefs = { use_ai: boolean; provider: AIProvider | null; rules: string; hashtags: number };
+export type AIOptions = { use_ai: boolean | null; rules: string };
+
+export const AI_FAILURES: Record<string, string> = {
+  ai_auth: "la clave de la IA no es válida",
+  ai_rate_limited: "la IA está saturada en este momento",
+  ai_unavailable: "la IA no respondió",
+  ai_refused: "la IA no quiso procesar este contenido",
+  ai_bad_output: "la IA dio una respuesta inválida",
+  ai_truncated: "la respuesta de la IA quedó incompleta",
+  ai_bad_request: "la IA rechazó la petición",
+  ai_not_configured: "la IA no está configurada",
+  person_filter: "se eligió una persona (la IA no sabe quién habla)",
+};
+
+export function aiStatusText(status: string | null, labels: Record<string, string> = {}): string | null {
+  if (!status || status === "off") return null;
+  if (status.startsWith("ai:")) {
+    const p = status.slice(3);
+    return `✨ Elegidos con ${labels[p] ?? ({ anthropic: "Claude", openai: "OpenAI", gemini: "Gemini" } as Record<string, string>)[p] ?? p}`;
+  }
+  const why = AI_FAILURES[status.slice(9)] ?? "la IA no respondió";
+  return `Esta vez ${why}; elegimos los clips con el análisis automático (risas, gritos, volumen).`;
+}
+
 export type Style = { id: string; name: string; preset: boolean; config: StyleConfig };
 export type LibraryItem = { id: string; kind: "logo" | "music"; name: string; size: number; created_at: string };
 export type Person = { id: number; seconds: number };
@@ -118,6 +147,11 @@ export type Clip = {
   render_status: "ready" | "rendering" | "failed";
   version: number;
   offset: number;
+  title: string;
+  caption: string;
+  hashtags: string[];
+  ai_provider: string | null;
+  cover_rev: string | null;
   created_at: string;
 };
 
@@ -130,6 +164,7 @@ export type Live = {
   status: LiveStatus;
   chat_status: "none" | "connected" | "reconnecting";
   auto_clips: boolean;
+  ai_review: boolean;
   sensitivity: "low" | "normal" | "high";
   clip_duration: number;
   final_clips: number;
@@ -190,6 +225,12 @@ const MESSAGES: Record<string, string> = {
   unsupported_live_url: "Pega el link de un directo de YouTube, Twitch, Kick o TikTok.",
   too_many_lives: "Ya estás grabando un directo. Termínalo antes de empezar otro.",
   live_not_active: "Este directo ya terminó.",
+  ai_not_configured: "La IA no está configurada en el servidor.",
+  no_text: "Este clip no tiene texto hablado.",
+  ai_unavailable: "La IA no respondió. Inténtalo de nuevo.",
+  ai_rate_limited: "La IA está saturada. Prueba en un momento.",
+  ai_refused: "La IA no quiso procesar este clip.",
+  ai_auth: "La clave de la IA del servidor no es válida.",
   clip_busy: "Este clip ya se está renderizando.",
   person_not_found: "No encontramos a esa persona en el video.",
   invalid_style: "Ese estilo de subtítulos no existe.",
@@ -248,7 +289,7 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
 /** Upload with progress (fetch can't report upload progress yet). */
 export function uploadVideo(
   file: File,
-  opts: { clip_count: number; clip_duration: number; render: RenderOptions },
+  opts: { clip_count: number; clip_duration: number; render: RenderOptions; ai: AIOptions },
   onProgress: (pct: number) => void,
 ): Promise<Job> {
   return new Promise((resolve, reject) => {
@@ -257,6 +298,7 @@ export function uploadVideo(
     form.append("clip_count", String(opts.clip_count));
     form.append("clip_duration", String(opts.clip_duration));
     form.append("render", JSON.stringify(opts.render));
+    form.append("ai", JSON.stringify(opts.ai));
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/jobs/upload");
     xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(Math.round((e.loaded / e.total) * 100));
@@ -281,6 +323,7 @@ export const STAGE_LABELS: Record<string, string> = {
   transcribing: "Transcribiendo palabra por palabra",
   detecting_moments: "Buscando risas, gritos y picos",
   detecting_faces: "Reconociendo caras y quién habla",
+  ai_selecting: "La IA está eligiendo los mejores momentos",
   rendering: "Creando clips verticales con subtítulos",
   done: "Listo",
   failed: "Error",
@@ -296,6 +339,7 @@ export const REASON_LABELS: Record<string, string> = {
   persona: "👤 Persona elegida",
   chat: "💬 Chat",
   "clip ahora": "⚡ ¡Clip ahora!",
+  IA: "✨ IA",
 };
 
 export function fmtTime(s: number): string {

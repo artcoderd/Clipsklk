@@ -16,3 +16,7 @@ packaging==26.4
 python-multipart==0.0.34
 boto3==1.44.12
 pywebpush==2.5.0
+# AI providers (only the transcript text is sent)
+anthropic==2.14.0
+openai==3.59.0
+google-genai==3.6.1

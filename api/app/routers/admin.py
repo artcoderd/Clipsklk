@@ -9,7 +9,7 @@ from app import activity
 from app.config import get_settings
 from app.db import get_db
 from app.deps import require_admin
-from app.models import ActivityLog, Invitation, Job, JobStatus, Role, User
+from app.models import ActivityLog, AIUsage, Invitation, Job, JobStatus, Role, User
 from app.schemas import (ActivityOut, InvitationCreatedOut, InvitationCreateIn, InvitationOut,
                          UserOut, UserUpdateIn)
 from app.security import new_invitation_token
@@ -25,6 +25,15 @@ def stats(_: User = Depends(require_admin), db: Session = Depends(get_db)):
         "active_jobs": db.scalar(select(func.count()).select_from(Job)
                                  .where(Job.status.in_([JobStatus.queued, JobStatus.running]))),
         "jobs_total": db.scalar(select(func.count()).select_from(Job)),
+        # AI tokens in the last 30 days, per provider (to watch the API bill).
+        "ai_usage_30d": [
+            {"provider": p, "model": m, "calls": n, "input_tokens": i or 0, "output_tokens": o or 0, "cached_tokens": c or 0}
+            for p, m, n, i, o, c in db.execute(
+                select(AIUsage.provider, AIUsage.model, func.count(), func.sum(AIUsage.input_tokens),
+                       func.sum(AIUsage.output_tokens), func.sum(AIUsage.cached_tokens))
+                .where(AIUsage.created_at >= datetime.now(timezone.utc) - timedelta(days=30))
+                .group_by(AIUsage.provider, AIUsage.model))
+        ],
     }
 
 

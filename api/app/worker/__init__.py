@@ -22,3 +22,12 @@ def enqueue_live(session_id: uuid.UUID) -> None:
 
 def enqueue_live_clip(clip_id: uuid.UUID) -> None:
     _send("app.worker.tasks.make_live_clip", clip_id)
+
+
+def enqueue_live_review(session_id, asset_id, offset: float) -> None:
+    from app.worker.celery_app import celery_app
+    celery_app.send_task("app.worker.tasks.live_ai_review", args=[str(session_id), str(asset_id), float(offset)])
+
+
+def enqueue_cover(clip_id) -> None:
+    _send("app.worker.tasks.refresh_cover", clip_id)

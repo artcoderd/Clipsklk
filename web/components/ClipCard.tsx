@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { fmtTime, LAYOUT_LABELS, REASON_LABELS, type Clip } from "@/lib/api";
+import { ClipText } from "./ClipText";
 
 async function shareClip(clip: Clip, title: string) {
   // Native share sheet (Instagram, TikTok, WhatsApp...) with the actual file when supported.
@@ -11,7 +12,8 @@ async function shareClip(clip: Clip, title: string) {
     const blob = await res.blob();
     const file = new File([blob], `clipeo-clip${clip.index}.mp4`, { type: "video/mp4" });
     if (navigator.canShare?.({ files: [file] })) {
-      await navigator.share({ files: [file], title });
+      const text = [clip.caption, clip.hashtags.map((t) => `#${t}`).join(" ")].filter(Boolean).join("\n\n");
+      await navigator.share({ files: [file], title: clip.title || title, text });
       return true;
     }
   } catch (e) {
@@ -22,7 +24,9 @@ async function shareClip(clip: Clip, title: string) {
 
 const ASPECT: Record<string, string> = { "9:16": "9 / 16", "4:5": "4 / 5", "1:1": "1 / 1", "16:9": "16 / 9" };
 
-export function ClipCard({ clip, title, onEdit }: { clip: Clip; title: string; onEdit?: () => void }) {
+export function ClipCard({ clip, title, onEdit, onChange, aiAvailable = false }: {
+  clip: Clip; title: string; onEdit?: () => void; onChange?: (c: Clip) => void; aiAvailable?: boolean;
+}) {
   const [sharing, setSharing] = useState(false);
   const canShare = typeof navigator !== "undefined" && "share" in navigator;
   const v = `v=${clip.version}`;   // new URL after each re-render (no stale cache)
@@ -35,7 +39,7 @@ export function ClipCard({ clip, title, onEdit }: { clip: Clip; title: string; o
           <video
             key={clip.version}
             src={`/api/clips/${clip.id}/video?${v}`}
-            poster={`/api/clips/${clip.id}/thumbnail?${v}`}
+            poster={clip.cover_rev ? `/api/clips/${clip.id}/cover?c=${clip.cover_rev}` : `/api/clips/${clip.id}/thumbnail?${v}`}
             controls={!rendering}
             playsInline
             preload="none"
@@ -60,7 +64,11 @@ export function ClipCard({ clip, title, onEdit }: { clip: Clip; title: string; o
             {fmtTime(clip.offset + clip.start)}–{fmtTime(clip.offset + clip.end)} · {Math.round(clip.duration)}s
           </span>
         </div>
-        {clip.text && <p className="line-clamp-3 text-sm text-white/70">“{clip.text}”</p>}
+        {onChange && (clip.title || clip.caption) ? (
+          <ClipText key={`${clip.id}-${clip.title}-${clip.caption}`} clip={clip} aiAvailable={aiAvailable} onChange={onChange} />
+        ) : (
+          clip.text && <p className="line-clamp-3 text-sm text-white/70">“{clip.text}”</p>
+        )}
         {clip.render_status === "failed" && (
           <p className="rounded-xl bg-red-500/10 p-2 text-xs text-red-200">Falló el último render. Prueba de nuevo.</p>
         )}
@@ -73,7 +81,7 @@ export function ClipCard({ clip, title, onEdit }: { clip: Clip; title: string; o
           {onEdit && (
             <button onClick={onEdit} disabled={rendering}
                     className="min-h-11 rounded-2xl bg-white/10 px-4 text-sm font-semibold hover:bg-white/15 disabled:opacity-50">
-              Editar
+              Editar video
             </button>
           )}
           <a

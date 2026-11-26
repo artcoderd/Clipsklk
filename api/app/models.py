@@ -1,4 +1,5 @@
 import enum
+import hashlib
 import uuid
 from datetime import datetime, timezone
 
@@ -113,6 +114,10 @@ class Job(Base):
     render: Mapped[dict] = mapped_column(JSON, default=dict)
     # "Clips of one person": the person id the next clips must focus on.
     focus_person: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # AI options for this project: {"use_ai": bool, "rules": str}
+    ai: Mapped[dict] = mapped_column(JSON, default=dict)
+    # How the last selection went: "ai:<provider>" or "fallback:<reason>" (shown to the user).
+    ai_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[JobStatus] = mapped_column(Enum(JobStatus, name="job_status"), default=JobStatus.queued)
     progress: Mapped[int] = mapped_column(Integer, default=0)
     stage: Mapped[str] = mapped_column(String(64), default="queued")
@@ -147,9 +152,21 @@ class Clip(Base):
     asset_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("media_assets.id"), nullable=True)
     # ...and `offset` is where that source starts inside the whole broadcast.
     offset: Mapped[float] = mapped_column(Float, default=0.0)
+    # Publishing: cover title, text and hashtags (AI or from the clip's words).
+    title: Mapped[str] = mapped_column(String(120), default="")
+    caption: Mapped[str] = mapped_column(Text, default="")
+    hashtags: Mapped[list] = mapped_column(JSON, default=list)
+    cover_t: Mapped[float | None] = mapped_column(Float, nullable=True)   # seconds from the clip start
+    cover_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    ai_provider: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     job: Mapped[Job] = relationship(back_populates="clips")
+
+    @property
+    def cover_rev(self) -> str | None:
+        """Changes whenever the cover image is redrawn (for cache-busting URLs)."""
+        return hashlib.sha1(self.cover_key.encode()).hexdigest()[:10] if self.cover_key else None
 
 
 class SubtitleStyle(Base):
@@ -198,6 +215,7 @@ class LiveSession(Base):
     status: Mapped[str] = mapped_column(String(16), default="starting")
     chat_status: Mapped[str] = mapped_column(String(16), default="none")   # none | connected | reconnecting
     auto_clips: Mapped[bool] = mapped_column(default=True)
+    ai_review: Mapped[bool] = mapped_column(default=True)   # AI looks at the last minutes periodically
     sensitivity: Mapped[str] = mapped_column(String(8), default="normal")   # low | normal | high
     clip_duration: Mapped[int] = mapped_column(Integer, default=45)          # automatic clips
     final_clips: Mapped[int] = mapped_column(Integer, default=5)            # best clips at the end
@@ -222,3 +240,30 @@ class PushSubscription(Base):
     p256dh: Mapped[str] = mapped_column(String(255))
     auth: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AIPrefs(Base):
+    """Each user's AI preferences: their own rules are added to the viral ones."""
+    __tablename__ = "ai_prefs"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    use_ai: Mapped[bool] = mapped_column(default=True)
+    provider: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    rules: Mapped[str] = mapped_column(Text, default="")
+    hashtags: Mapped[int] = mapped_column(Integer, default=5)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class AIUsage(Base):
+    """Tokens spent per AI call, for the admin panel's cost view."""
+    __tablename__ = "ai_usage"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(16))
+    model: Mapped[str] = mapped_column(String(64))
+    purpose: Mapped[str] = mapped_column(String(16))      # select | caption | live
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cached_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)

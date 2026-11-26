@@ -5,7 +5,7 @@ TikTok, Facebook) o subes un archivo, y recibes clips verticales con subtítulos
 Funciona desde el navegador en iPhone, Android, Windows y Mac, y se puede instalar
 en la pantalla de inicio (PWA).
 
-## Estado: Fases 1 a 4 ✅ (base, video grabado, encuadre vertical y subtítulos, directos en vivo)
+## Estado: Fases 1 a 5 ✅ (base, video grabado, encuadre vertical y subtítulos, directos en vivo, IA)
 
 | Pieza | Qué hay |
 |---|---|
@@ -115,6 +115,34 @@ Para activar las notificaciones, genera las claves una vez y ponlas en `.env`:
 docker compose run --rm api python -m app.cli vapid-keys
 ```
 
+### Fase 5: selección con IA
+
+```
+transcripción con tiempos (+ "(risas)", "(gritos)" del análisis) ─► Claude / OpenAI / Gemini
+   reglas virales: gancho en 3 s · se entiende solo · termina en el remate · una idea
+   + reglas del creador (página IA) + reglas del proyecto
+─► respuesta en JSON con esquema estricto ─► se comprueba contra la transcripción real
+   (tiempos que existen, inicio y fin de frase, duración, sin solaparse)
+─► clips con título de portada, texto y hashtags ─► portada con el título
+```
+
+- **Solo se envía texto** (la transcripción). El video, el audio y los datos del usuario no salen
+  del servidor. Las claves de la IA viven en `.env` del servidor y nunca llegan al navegador.
+- **Claude por defecto** (`claude-opus-5-5`, esfuerzo `medium`), con salida estructurada,
+  la transcripción en caché 1 hora (pedir "más clips" del mismo video sale más barato) y
+  respaldo automático si el modelo rechaza un contenido. OpenAI y Gemini también funcionan;
+  el usuario elige en la página **IA** cuál usar entre los configurados.
+- **Si la IA falla** (clave mala, saturada, rechazo, respuesta inválida) o propone menos clips de
+  los pedidos, el análisis automático completa el resto, y la web avisa por qué.
+- **Portada** en el momento más expresivo, con el título y sin subtítulos; **texto y hashtags**
+  listos para copiar, editar o pedir "otro texto" a la IA. Cambiar el título redibuja la portada.
+- **En directo**, cada `LIVE_AI_REVIEW_MINUTES` la IA lee los últimos minutos y propone un clip
+  solo si hay un momento realmente bueno (si no, no se guarda nada).
+- El panel de administración muestra los **tokens gastados** por proveedor en 30 días.
+
+Se probó con los tres SDK oficiales contra respuestas simuladas a nivel HTTP (sin claves reales
+en este entorno), y de punta a punta en Docker con un servidor que imita la API de Claude.
+
 ## Arrancar en local
 
 Requisitos: Docker con Compose.
@@ -204,7 +232,7 @@ pon `SITE_ADDRESS=clipeo.app` en `.env` y Caddy saca el certificado HTTPS solo
 2. ~~Video grabado~~ ✅
 3. ~~Encuadre vertical y subtítulos~~ ✅
 4. ~~Directos en vivo~~ ✅
-5. Selección con IA (Claude / OpenAI / Gemini) con reglas virales y reglas propias.
+5. ~~Selección con IA~~ ✅
 6. Editor web táctil.
 7. Publicar: descarga, compartir nativo, Meta, TikTok y Telegram.
 8. Pagos con Stripe, límites por plan, correo, backups y despliegue con dominio.

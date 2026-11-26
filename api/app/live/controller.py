@@ -117,6 +117,7 @@ class LiveController:
         clipper = AutoClipper(clip_seconds=live.clip_duration, sensitivity=live.sensitivity,
                               max_per_hour=s.live_max_auto_clips_per_hour)
         self.auto = live.auto_clips
+        self._ai_review = live.ai_review
         db.close()
         self.rec_dir.mkdir(parents=True, exist_ok=True)
         detector = LiveDetector(self._chat_at, clipper)
@@ -139,6 +140,10 @@ class LiveController:
         rec_thread = threading.Thread(target=lambda: result.setdefault("reason", recorder.run()), name="recorder")
         rec_thread.start()
 
+        from app.ai.providers import configured as ai_configured
+        review_every = s.live_ai_review_minutes * 60
+        ai_review = bool(self._ai_review and ai_configured() and review_every > 0)
+        last_review = 0.0
         clip_now: list[tuple[float, int]] = []   # (wall time of the tap, seconds)
         last_status = last_beat = 0.0
         try:
@@ -179,7 +184,12 @@ class LiveController:
                     if self.timeline.duration >= item[1] or not rec_thread.is_alive():
                         self.pending_clips.remove(item)
                         self._make_clip(user_id, job_id, *item)
-                # 5) status for the web + heartbeat
+                # 5) every few minutes the AI reads the last stretch and may propose a clip
+                if ai_review and self.auto and self.timeline.duration - last_review >= review_every:
+                    end_t = self.timeline.duration
+                    self._ai_review_window(user_id, max(0.0, last_review - 15), end_t)
+                    last_review = end_t
+                # 6) status for the web + heartbeat
                 now = time.time()
                 if now - last_status >= 2:
                     last_status = now
@@ -251,6 +261,28 @@ class LiveController:
             enqueue_live_clip(clip.id)
         except Exception:
             log.exception("live clip failed")
+            db.rollback()
+        finally:
+            db.close()
+
+    def _ai_review_window(self, user_id, t0: float, t1: float) -> None:
+        """Cuts [t0, t1] into its own source and asks the GPU worker's AI review to look at it."""
+        from app.worker import enqueue_live_review
+
+        db = SessionLocal()
+        try:
+            asset_id = uuid.uuid4()
+            dest = self.root / f"review-{asset_id}.mp4"
+            offset = cut_window(self.timeline, self.rec_dir, t0, t1, dest)
+            key = f"users/{user_id}/live/{self.sid}/review/{asset_id}.mp4"
+            get_storage().put_file(key, dest, "video/mp4")
+            dest.unlink(missing_ok=True)
+            db.add(MediaAsset(id=asset_id, user_id=user_id, source_key=f"live:{self.sid}:review:{asset_id}",
+                              storage_key=key))
+            db.commit()
+            enqueue_live_review(self.sid, asset_id, offset)
+        except Exception:
+            log.exception("AI review window failed")
             db.rollback()
         finally:
             db.close()

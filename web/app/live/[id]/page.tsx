@@ -14,6 +14,7 @@ import {
   api, errorMessage, fmtTime, LIVE_STATUS, PLATFORM_LABELS,
   type Clip, type Live, type LiveActivity, type LiveEvent,
 } from "@/lib/api";
+import { useAI } from "@/lib/useAI";
 import { useMe } from "@/lib/useMe";
 
 const ACTIVE = new Set(["starting", "waiting", "recording", "reconnecting"]);
@@ -22,6 +23,7 @@ const SENS = [["low", "Baja"], ["normal", "Normal"], ["high", "Alta"]] as const;
 export default function LivePage() {
   const { id } = useParams<{ id: string }>();
   const { user, loading } = useMe();
+  const ai = useAI(!!user);
   const [live, setLive] = useState<Live | null>(null);
   const [activity, setActivity] = useState<LiveActivity | null>(null);
   const [clips, setClips] = useState<Clip[]>([]);
@@ -81,7 +83,7 @@ export default function LivePage() {
     }
   }
 
-  async function update(patch: Partial<Pick<Live, "auto_clips" | "sensitivity">>) {
+  async function update(patch: Partial<Pick<Live, "auto_clips" | "sensitivity" | "ai_review">>) {
     try {
       setLive(await api<Live>(`/lives/${id}`, { method: "PATCH", json: patch }));
     } catch (e) {
@@ -150,7 +152,7 @@ export default function LivePage() {
             {activity && activity.interest.length > 1 && <ActivityChart interest={activity.interest} chat={activity.chat} />}
             <div className="space-y-3 rounded-2xl bg-black/20 p-4">
               <label className="flex items-center justify-between gap-3 text-sm">
-                <span>Clips automáticos <span className="block text-xs text-white/50">risas, gritos, volumen y chat</span></span>
+                <span>Clips automáticos <span className="block text-xs text-white/50">risas, gritos, volumen y chat{ai.available && live.ai_review ? ", y la IA revisa cada pocos minutos" : ""}</span></span>
                 <input type="checkbox" checked={live.auto_clips} onChange={(e) => update({ auto_clips: e.target.checked })}
                        className="h-6 w-6 accent-fuchsia-500" />
               </label>
@@ -185,7 +187,8 @@ export default function LivePage() {
         </p>
       ) : (
         <section className="grid gap-4 sm:grid-cols-2">
-          {clips.map((c) => <ClipCard key={c.id} clip={c} title="Directo" onEdit={() => setEditing(c)} />)}
+          {clips.map((c) => <ClipCard key={c.id} clip={c} title="Directo" onEdit={() => setEditing(c)} onChange={upsert}
+                                      aiAvailable={ai.available} />)}
         </section>
       )}
       {editing && <ClipEditor clip={editing} jobId={live.job_id} onClose={() => setEditing(null)} onQueued={upsert} />}

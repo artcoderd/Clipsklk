@@ -20,7 +20,7 @@ from pydantic import ValidationError
 
 from app.render_options import validate_render
 from app.routers.clips import _serve
-from app.schemas import ClipOut, JobFromUrlIn, JobOut, MoreClipsIn, PersonOut, RenderOptions
+from app.schemas import AIOptions, ClipOut, JobFromUrlIn, JobOut, MoreClipsIn, PersonOut, RenderOptions
 from app.storage import StorageError, get_storage
 from app.worker import enqueue_job
 
@@ -54,7 +54,7 @@ def create_from_url(data: JobFromUrlIn, request: Request, user: User = Depends(g
     _check_quota(db, user)
     job = Job(user_id=user.id, source=JobSource.url, source_url=data.url.strip(), platform=platform,
               clip_count=data.clip_count, clip_duration=data.clip_duration,
-              render=validate_render(db, user.id, data.render))
+              render=validate_render(db, user.id, data.render), ai=data.ai.model_dump())
     db.add(job)
     db.flush()
     activity.log(db, "job_created", user.id, request, job=str(job.id), source="url", platform=platform)
@@ -65,12 +65,13 @@ def create_from_url(data: JobFromUrlIn, request: Request, user: User = Depends(g
 
 @router.post("/upload", response_model=JobOut, status_code=201)
 def create_from_upload(request: Request, file: UploadFile = File(...), clip_count: int = Form(5),
-                       clip_duration: int = Form(45), render: str = Form("{}"),
+                       clip_duration: int = Form(45), render: str = Form("{}"), ai: str = Form("{}"),
                        user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if not 1 <= clip_count <= 30 or not 10 <= clip_duration <= 180:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "invalid_clip_options")
     try:
         render_opts = validate_render(db, user.id, RenderOptions.model_validate_json(render or "{}"))
+        ai_opts = AIOptions.model_validate_json(ai or "{}").model_dump()
     except ValidationError:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "invalid_render_options")
     name = PurePath(file.filename or "video").name[:255]
@@ -80,7 +81,7 @@ def create_from_upload(request: Request, file: UploadFile = File(...), clip_coun
     _check_quota(db, user)
 
     job = Job(user_id=user.id, source=JobSource.upload, original_filename=name,
-              clip_count=clip_count, clip_duration=clip_duration, render=render_opts)
+              clip_count=clip_count, clip_duration=clip_duration, render=render_opts, ai=ai_opts)
     db.add(job)
     db.flush()
     key = f"users/{user.id}/jobs/{job.id}/source{ext}"

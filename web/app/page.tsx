@@ -11,6 +11,7 @@ import Link from "next/link";
 
 import { api, DEFAULT_RENDER, errorMessage, fmtTime, FORMAT_LABELS, LAYOUT_LABELS, LIVE_STATUS, PLATFORM_LABELS,
          uploadVideo, type Job, type Live, type RenderOptions } from "@/lib/api";
+import { useAI } from "@/lib/useAI";
 import { useLibrary } from "@/lib/useLibrary";
 import { useMe } from "@/lib/useMe";
 
@@ -48,6 +49,10 @@ export default function Home() {
   const [render, setRender] = useState<RenderOptions>(DEFAULT_RENDER);
   const [showOptions, setShowOptions] = useState(false);
   const library = useLibrary(!!user);
+  const ai = useAI(!!user);
+  const [useAi, setUseAi] = useState<boolean | null>(null);   // null = my preference
+  const [aiRules, setAiRules] = useState("");
+  const aiOn = useAi ?? ai.prefs?.use_ai ?? true;
 
   useEffect(() => setRender(loadOptions()), []);
   function changeRender(r: RenderOptions) {
@@ -86,12 +91,14 @@ export default function Home() {
       logo_id: library.logos.some((l) => l.id === render.logo_id) ? render.logo_id : null,
       style_id: library.styles.some((s) => s.id === render.style_id) ? render.style_id : DEFAULT_RENDER.style_id,
     };
-    const opts = { clip_count: clipCount, clip_duration: clipDuration, render: r };
+    const aiOpts = { use_ai: useAi, rules: aiRules };
+    const opts = { clip_count: clipCount, clip_duration: clipDuration, render: r, ai: aiOpts };
     try {
       if (mode === "live") {
         const live = await api<Live>("/lives", {
           method: "POST",
-          json: { url, auto_clips: autoClips, sensitivity, clip_duration: clipDuration, final_clips: finalClips, render: r },
+          json: { url, auto_clips: autoClips, sensitivity, clip_duration: clipDuration, final_clips: finalClips, render: r,
+                  ai: aiOpts, ai_review: aiOn },
         });
         router.push(`/live/${live.id}`);
         return;
@@ -250,6 +257,24 @@ export default function Home() {
               </div>
             </div>
           </div>
+
+          {ai.available && (
+            <div className="space-y-3 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-500/5 p-4">
+              <label className="flex items-center justify-between gap-3 text-sm">
+                <span>
+                  ✨ {mode === "live" ? "La IA revisa el directo cada pocos minutos" : "Elegir los clips con IA"}
+                  <span className="block text-xs text-white/50">Gancho, se entiende solo y termina en el remate. Escribe título y hashtags.</span>
+                </span>
+                <input type="checkbox" checked={aiOn} onChange={(e) => setUseAi(e.target.checked)}
+                       className="h-6 w-6 shrink-0 accent-fuchsia-500" />
+              </label>
+              {aiOn && (
+                <textarea value={aiRules} onChange={(e) => setAiRules(e.target.value)} maxLength={2000} rows={2}
+                          placeholder="Reglas solo para este video (opcional): p. ej. «solo los momentos sobre dinero»"
+                          className="input-glass !py-2 !text-sm" />
+              )}
+            </div>
+          )}
 
           <div className="rounded-2xl border border-white/10 bg-black/20">
             <button

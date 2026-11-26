@@ -10,9 +10,10 @@ import { jobTitle } from "@/components/JobCard";
 import { Loading, Shell } from "@/components/Shell";
 import { Button, Card, ErrorText, ProgressBar } from "@/components/ui";
 import {
-  api, errorMessage, JOB_ERRORS, PLATFORM_LABELS, STAGE_LABELS,
+  aiStatusText, api, errorMessage, JOB_ERRORS, PLATFORM_LABELS, STAGE_LABELS,
   type Clip, type Job, type JobEvent, type Person,
 } from "@/lib/api";
+import { useAI } from "@/lib/useAI";
 import { useMe } from "@/lib/useMe";
 
 const FINAL = new Set(["done", "failed", "canceled"]);
@@ -24,6 +25,7 @@ function byScore(a: Clip, b: Clip) {
 export default function JobPage() {
   const { id } = useParams<{ id: string }>();
   const { user, loading } = useMe();
+  const ai = useAI(!!user);
   const [job, setJob] = useState<Job | null>(null);
   const [clips, setClips] = useState<Clip[]>([]);
   const [missing, setMissing] = useState(false);
@@ -139,6 +141,11 @@ export default function JobPage() {
                 </div>
               </div>
             )}
+            {job.status === "done" && aiStatusText(job.ai_status) && (
+              <p className={`rounded-xl p-3 text-sm ${job.ai_status?.startsWith("ai:") ? "bg-fuchsia-500/10 text-fuchsia-100" : "bg-amber-500/10 text-amber-100"}`}>
+                {aiStatusText(job.ai_status)}
+              </p>
+            )}
             {job.error && (
               <p className="rounded-xl bg-red-500/10 p-3 text-sm text-red-200">
                 {JOB_ERRORS[job.error] ?? JOB_ERRORS.processing_failed}
@@ -187,7 +194,8 @@ export default function JobPage() {
           {clips.length > 0 && (
             <section className="grid gap-4 sm:grid-cols-2">
               {clips.map((c) => (
-                <ClipCard key={c.id} clip={c} title={title} onEdit={() => setEditing(c)} />
+                <ClipCard key={c.id} clip={c} title={title} onEdit={() => setEditing(c)} onChange={addClip}
+                          aiAvailable={ai.available} />
               ))}
             </section>
           )}

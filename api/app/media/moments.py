@@ -23,6 +23,11 @@ class Moment:
     score: float
     reasons: list[str] = field(default_factory=list)
     text: str = ""
+    title: str = ""
+    caption: str = ""
+    hashtags: list[str] = field(default_factory=list)
+    cover_t: float | None = None      # seconds from the clip start
+    ai: bool = False
 
 
 def _transcript_signals(transcript: dict, n: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -67,6 +72,38 @@ def _text(transcript: dict, a: float, b: float) -> str:
     words = [w["word"] for seg in transcript.get("segments", []) if seg["end"] >= a and seg["start"] <= b
              for w in (seg.get("words") or []) if a <= w["start"] < b]
     return " ".join(words).strip()
+
+
+def audio_reasons(analysis: dict, transcript: dict, a: float, b: float) -> list[str]:
+    """Which non-AI signals fire inside [a, b] (for labels)."""
+    n = max(1, int(np.ceil(b)) + 1)
+    t_laugh, _, _ = _transcript_signals(transcript, n)
+
+    def sig(name: str) -> np.ndarray:
+        out = np.zeros(n, np.float32)
+        v = np.asarray(analysis.get(name) or [], np.float32)[:n]
+        out[: len(v)] = v
+        return out
+
+    lo, hi = int(a), max(int(a) + 1, int(b))
+    found = []
+    for label, arr, th in (("risas", np.maximum(sig("laugh"), t_laugh), 0.5),
+                           ("gritos", sig("scream"), 0.5), ("volumen", sig("volume"), 0.6)):
+        if float(arr[lo:hi].max(initial=0)) >= th:
+            found.append(label)
+    return found
+
+
+def peak_time(analysis: dict, a: float, b: float) -> float:
+    """Seconds from `a` of the strongest moment in [a, b] (for the cover frame)."""
+    lo, hi = int(a), max(int(a) + 1, int(b))
+    best, at = -1.0, (b - a) * 0.6
+    for name in ("laugh", "scream", "volume"):
+        arr = analysis.get(name) or []
+        for s in range(lo, min(hi, len(arr))):
+            if arr[s] > best:
+                best, at = arr[s], s - a + 0.5
+    return float(min(max(0.0, at), max(0.0, b - a - 0.1)))
 
 
 def select_moments(analysis: dict, transcript: dict, count: int, clip_seconds: float, total: float,
