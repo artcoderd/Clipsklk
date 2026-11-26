@@ -26,6 +26,14 @@ cortafuegos, crea `.env` desde `ops/env.production` con contraseñas aleatorias 
 en el propio servidor y las claves de notificaciones, detecta si hay GPU, construye y
 arranca. Después solo falta crear tu cuenta de dueño y añadir tus claves con `nano .env`.
 
+## Opción gratis: en tu propia computadora (Mac)
+
+Clipeo puede correr en tu Mac y publicarse en tu dominio con **Cloudflare Tunnel** (gratis,
+sin abrir puertos). Instala Docker Desktop, crea un túnel en Cloudflare Zero Trust cuyo
+*public hostname* apunte a `http://gateway:80`, y ejecuta `bash ops/start-mac.sh` en la
+carpeta del proyecto. La app funciona mientras el Mac esté encendido; las subidas por el
+túnel tienen un límite de 100 MB (los videos grandes, mejor por link).
+
 ## 1. El servidor
 
 Recomendado: **un solo servidor Linux con GPU NVIDIA** (Ubuntu 22.04/24.04, 8+ GB de VRAM,

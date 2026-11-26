@@ -1,0 +1,13 @@
+# Run Clipeo on your own computer (Mac/Windows/Linux) and publish it on your domain
+# through a Cloudflare Tunnel: no open ports, no public IP, HTTPS by Cloudflare.
+#   docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d --build
+# Needs CLOUDFLARE_TUNNEL_TOKEN in .env and SITE_ADDRESS=:80 (Cloudflare does HTTPS).
+# In Cloudflare Zero Trust, the tunnel's public hostname points to: http://gateway:80
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:2025.11.1
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?Put CLOUDFLARE_TUNNEL_TOKEN in .env}
+    depends_on: [gateway]
