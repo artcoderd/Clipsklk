@@ -15,12 +15,14 @@ backup() {
   mkdir -p "$BACKUP_DIR"
   name="clipeo-$(date -u +%Y%m%d-%H%M%S).dump"
   tmp="$BACKUP_DIR/.$name.partial"
+  trap 'rm -f "$tmp" "$tmp.enc"' EXIT
   pg_dump --format=custom --compress=6 --no-owner --file="$tmp"
   if [ -n "${BACKUP_PASSPHRASE:-}" ]; then
     openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:BACKUP_PASSPHRASE -in "$tmp" -out "$tmp.enc"
     rm -f "$tmp"; tmp="$tmp.enc"; name="$name.enc"
   fi
   mv "$tmp" "$BACKUP_DIR/$name"
+  trap - EXIT
   echo "$(date -u +%FT%TZ) backup ok: $name ($(du -h "$BACKUP_DIR/$name" | cut -f1))"
   if [ -n "${BACKUP_REMOTE:-}" ]; then
     rclone copyto "$BACKUP_DIR/$name" "$BACKUP_REMOTE/$name" && echo "uploaded to $BACKUP_REMOTE"

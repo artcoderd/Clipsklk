@@ -402,6 +402,7 @@ export const STAGE_LABELS: Record<string, string> = {
   rendering: "Creando clips verticales con subtítulos",
   done: "Listo",
   failed: "Error",
+  live: "Grabando directo",
 };
 
 export const REASON_LABELS: Record<string, string> = {
