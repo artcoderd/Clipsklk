@@ -84,8 +84,13 @@ class MediaAsset(Base):
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     has_video: Mapped[bool] = mapped_column(default=True)
     language: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    fps: Mapped[float | None] = mapped_column(Float, nullable=True)
     transcript_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     analysis_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    vision_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # People found on screen: [{id, seconds, thumb_key}], most visible first.
+    people: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    preview_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -103,6 +108,10 @@ class Job(Base):
     title: Mapped[str | None] = mapped_column(String(300), nullable=True)
     clip_count: Mapped[int] = mapped_column(Integer, default=5)
     clip_duration: Mapped[int] = mapped_column(Integer, default=45)
+    # Default render options for this project's clips (see schemas.RenderOptions).
+    render: Mapped[dict] = mapped_column(JSON, default=dict)
+    # "Clips of one person": the person id the next clips must focus on.
+    focus_person: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[JobStatus] = mapped_column(Enum(JobStatus, name="job_status"), default=JobStatus.queued)
     progress: Mapped[int] = mapped_column(Integer, default=0)
     stage: Mapped[str] = mapped_column(String(64), default="queued")
@@ -129,9 +138,37 @@ class Clip(Base):
     text: Mapped[str] = mapped_column(Text, default="")
     storage_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     thumbnail_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    render: Mapped[dict] = mapped_column(JSON, default=dict)
+    layout: Mapped[str | None] = mapped_column(String(16), nullable=True)   # the one actually used
+    render_status: Mapped[str] = mapped_column(String(16), default="ready")  # ready | rendering | failed
+    version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     job: Mapped[Job] = relationship(back_populates="clips")
+
+
+class SubtitleStyle(Base):
+    __tablename__ = "subtitle_styles"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(60))
+    config: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class LibraryItem(Base):
+    """A user's reusable files: logos (watermark) and background music."""
+    __tablename__ = "library_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))   # logo | music
+    name: Mapped[str] = mapped_column(String(120))
+    storage_key: Mapped[str] = mapped_column(String(512))
+    content_type: Mapped[str] = mapped_column(String(64))
+    size: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class ActivityLog(Base):

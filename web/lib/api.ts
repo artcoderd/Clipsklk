@@ -22,12 +22,85 @@ export type Job = {
   original_filename: string | null;
   clip_count: number;
   clip_duration: number;
+  render: Partial<RenderOptions>;
+  focus_person: number | null;
   status: JobStatus;
   progress: number;
   stage: string;
   error: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type Format = "9:16" | "4:5" | "1:1" | "16:9";
+export type Layout = "auto" | "follow" | "split" | "gameplay" | "fit";
+export type Framing = "fixed" | "smooth" | "dynamic" | "zoom";
+export type Rect = [number, number, number, number];
+
+export type RenderOptions = {
+  format: Format;
+  layout: Layout;
+  framing: Framing;
+  subtitles: boolean;
+  style_id: string;
+  music_id: string | null;
+  music_volume: number;
+  logo_id: string | null;
+  logo_position: "top-left" | "top-right";
+  gameplay: { cam: Rect | null; game: Rect | null } | null;
+  person?: number | null;
+};
+
+export const DEFAULT_RENDER: RenderOptions = {
+  format: "9:16",
+  layout: "auto",
+  framing: "smooth",
+  subtitles: true,
+  style_id: "preset:clasico",
+  music_id: null,
+  music_volume: 0.15,
+  logo_id: null,
+  logo_position: "top-right",
+  gameplay: null,
+};
+
+export type StyleConfig = {
+  font: "montserrat-black" | "montserrat-extrabold" | "montserrat-bold" | "bebas";
+  size: number;
+  text_color: string;
+  highlight_color: string;
+  outline_color: string;
+  outline: number;
+  shadow: number;
+  uppercase: boolean;
+  words_per_line: number;
+  animation: "none" | "highlight" | "pop";
+  position: "bottom" | "middle" | "top";
+};
+
+export type Style = { id: string; name: string; preset: boolean; config: StyleConfig };
+export type LibraryItem = { id: string; kind: "logo" | "music"; name: string; size: number; created_at: string };
+export type Person = { id: number; seconds: number };
+
+export const FORMAT_LABELS: Record<Format, string> = {
+  "9:16": "9:16 TikTok · Reels · Shorts",
+  "4:5": "4:5 Feed",
+  "1:1": "1:1 Cuadrado",
+  "16:9": "16:9 Horizontal",
+};
+export const LAYOUT_LABELS: Record<Layout | "audio", string> = {
+  auto: "Automático",
+  follow: "Seguir al que habla",
+  split: "Pantalla dividida",
+  gameplay: "Gameplay",
+  fit: "Completo con fondo",
+  audio: "Solo audio",
+};
+export const FRAMING_LABELS: Record<Framing, string> = {
+  fixed: "Fija",
+  smooth: "Suave",
+  dynamic: "Dinámica",
+  zoom: "Cortes con zoom",
 };
 
 export type Clip = {
@@ -40,6 +113,10 @@ export type Clip = {
   score: number;
   reasons: string[];
   text: string;
+  render: Partial<RenderOptions>;
+  layout: string | null;
+  render_status: "ready" | "rendering" | "failed";
+  version: number;
   created_at: string;
 };
 
@@ -71,6 +148,13 @@ const MESSAGES: Record<string, string> = {
   forbidden: "No tienes permiso.",
   not_authenticated: "Inicia sesión para continuar.",
   job_busy: "Este proyecto todavía se está procesando.",
+  clip_busy: "Este clip ya se está renderizando.",
+  person_not_found: "No encontramos a esa persona en el video.",
+  invalid_style: "Ese estilo de subtítulos no existe.",
+  invalid_music: "Esa música ya no está en tu biblioteca.",
+  invalid_logo: "Ese logo ya no está en tu biblioteca.",
+  too_many_styles: "Llegaste al máximo de estilos guardados.",
+  library_full: "Tu biblioteca está llena. Borra algo primero.",
   job_not_ready: "Espera a que termine el primer procesamiento.",
 };
 
@@ -87,6 +171,9 @@ export const JOB_ERRORS: Record<string, string> = {
   invalid_media: "El archivo no es un video o audio válido.",
   no_audio: "El video no tiene audio, así que no podemos encontrar momentos.",
   no_moments: "No encontramos momentos para recortar.",
+  no_person_moments: "No encontramos más momentos en los que hable esa persona.",
+  person_not_found: "No encontramos a esa persona en el video.",
+  render_failed: "Falló el render del clip. Inténtalo de nuevo.",
   ffmpeg_failed: "Falló el corte del video. Inténtalo de nuevo.",
   processing_failed: "Algo falló al procesar el video. Inténtalo de nuevo.",
 };
@@ -119,7 +206,7 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
 /** Upload with progress (fetch can't report upload progress yet). */
 export function uploadVideo(
   file: File,
-  opts: { clip_count: number; clip_duration: number },
+  opts: { clip_count: number; clip_duration: number; render: RenderOptions },
   onProgress: (pct: number) => void,
 ): Promise<Job> {
   return new Promise((resolve, reject) => {
@@ -127,6 +214,7 @@ export function uploadVideo(
     form.append("file", file);
     form.append("clip_count", String(opts.clip_count));
     form.append("clip_duration", String(opts.clip_duration));
+    form.append("render", JSON.stringify(opts.render));
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/jobs/upload");
     xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(Math.round((e.loaded / e.total) * 100));
@@ -150,7 +238,8 @@ export const STAGE_LABELS: Record<string, string> = {
   extracting_audio: "Extrayendo audio",
   transcribing: "Transcribiendo palabra por palabra",
   detecting_moments: "Buscando risas, gritos y picos",
-  cutting: "Cortando clips",
+  detecting_faces: "Reconociendo caras y quién habla",
+  rendering: "Creando clips verticales con subtítulos",
   done: "Listo",
   failed: "Error",
 };
@@ -162,6 +251,7 @@ export const REASON_LABELS: Record<string, string> = {
   "emoción": "🔥 Emoción",
   "conversación": "💬 Conversación",
   "video completo": "🎬 Completo",
+  persona: "👤 Persona elegida",
 };
 
 export function fmtTime(s: number): string {

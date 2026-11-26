@@ -5,14 +5,14 @@ TikTok, Facebook) o subes un archivo, y recibes clips verticales con subtítulos
 Funciona desde el navegador en iPhone, Android, Windows y Mac, y se puede instalar
 en la pantalla de inicio (PWA).
 
-## Estado: Fase 1 ✅ · Fase 2 (video grabado) ✅
+## Estado: Fase 1 ✅ · Fase 2 (video grabado) ✅ · Fase 3 (encuadre vertical y subtítulos) ✅
 
 | Pieza | Qué hay |
 |---|---|
 | `web/` | Next.js 16 + React 19 + Tailwind 4. PWA móvil primero, diseño oscuro con cristal. Login, registro por invitación, pantalla para pegar link / subir video, progreso en tiempo real y panel de administración. |
 | `api/` | FastAPI + SQLAlchemy + Alembic. Cuentas, roles, invitaciones, 2FA, trabajos, registro de actividad. |
 | `api/app/worker/` | Celery (cola `video`): descarga, transcripción, detección de momentos y corte. |
-| `api/app/media/` | yt-dlp, ffmpeg (NVENC/x264), faster-whisper, análisis de audio y selección de clips. |
+| `api/app/media/` | yt-dlp, ffmpeg (NVENC/x264), faster-whisper, análisis de audio, caras (OpenCV), selección, render y subtítulos. |
 | Infra | PostgreSQL, Redis y Caddy (puerta de entrada única) con Docker Compose. |
 
 Ya funciona:
@@ -51,8 +51,35 @@ link (yt-dlp) o archivo ─► almacenamiento (disco o S3/R2) ─► ffprobe
 - **Errores claros**: si YouTube bloquea la descarga desde el servidor, el video es privado, es
   un directo, etc., la web lo explica y sugiere subir el archivo.
 
-Pendiente para la fase 3: "elegir una persona y sacar clips solo de ella" necesita detección de
-hablantes y de rostros, que llega con el encuadre vertical.
+### Fase 3: encuadre vertical y subtítulos
+
+```
+video ─► caras (YuNet, 4 por segundo) ─► seguimiento ─► personas (SFace: misma cara = misma persona)
+      └► ¿quién habla? (movimiento de la boca, medido 8 veces por segundo, menos el de la cabeza)
+render: ffmpeg decodifica ─► Python compone cada fotograma ─► ffmpeg + libass (subtítulos)
+        + música con ducking + volumen -14 LUFS ─► NVENC o x264
+```
+
+- **Encuadres**: *Seguir al que habla*, *Pantalla dividida* (2 o 3 personas), *Gameplay*
+  (cámara arriba y juego abajo, con recuadros que se dibujan a mano en el teléfono) y *Completo
+  con fondo* (video entero sobre una copia desenfocada). *Automático* elige según quién sale.
+- **Cámara**: *Fija*, *Suave* (se desliza), *Dinámica* (corta al cambiar de hablante) y
+  *Cortes con zoom* (corta y acerca/aleja).
+- **Formatos** 9:16, 4:5, 1:1 y 16:9. Los subtítulos quedan fuera de la zona que tapan los
+  botones de TikTok y Reels; en pantalla dividida van en la línea divisoria y en gameplay justo
+  bajo la cámara.
+- **Subtítulos palabra por palabra** (karaoke) con 4 estilos de fábrica y estilos propios
+  (letra, tamaño, colores, borde, sombra, animación, posición, mayúsculas) con vista previa en vivo.
+  Las fuentes (Montserrat y Bebas Neue, licencia OFL) van incluidas en el repositorio.
+- **Biblioteca** por usuario con logos (marca de agua) y música de fondo, que baja sola cuando
+  alguien habla.
+- **Clips solo de una persona**: la web muestra las caras encontradas; eliges una y los nuevos
+  clips son de momentos en que ella habla, con la cámara siempre en ella.
+- **Editar y volver a renderizar** cada clip con otras opciones sin reprocesar el video.
+- Videos solo de audio (podcasts) salen con fondo degradado, logo y subtítulos.
+
+Se probó con videos sintéticos de 2 y 3 personas y con cortes de cámara: personas agrupadas
+correctamente y el hablante acertado en el 100 % de los momentos (sin contar 1,5 s tras cada cambio).
 
 ## Arrancar en local
 
@@ -87,7 +114,8 @@ cd web && npm install && npm run dev     # http://localhost:3000
 ```
 
 Pruebas: `cd api && pip install -r requirements-dev.txt && pytest` (usa SQLite, Redis falso y
-audio sintético con gritos y risas en tiempos conocidos; solo necesita `ffmpeg` instalado).
+audio sintético con gritos y risas en tiempos conocidos; necesita `ffmpeg` instalado y descarga
+una vez los modelos de caras de Hugging Face).
 
 ### Servidor con GPU (NVIDIA)
 
@@ -97,9 +125,9 @@ Requisitos en el servidor: driver de NVIDIA y NVIDIA Container Toolkit.
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 ```
 
-El worker usa entonces Whisper `large-v3` en la GPU (float16) y NVENC para cortar. Sin GPU, el
+El worker usa entonces Whisper `large-v3` en la GPU (float16), decodifica con la GPU y codifica con NVENC. Sin GPU, el
 mismo código usa la CPU (Whisper `small` y x264), útil para desarrollar. El modelo se descarga
-una vez de Hugging Face y queda guardado en el volumen `models`.
+una vez de Hugging Face y queda guardado en el volumen `models` (igual que los de caras, YuNet y SFace).
 
 ### Almacenamiento en Cloudflare R2 (producción)
 
@@ -140,7 +168,7 @@ pon `SITE_ADDRESS=clipeo.app` en `.env` y Caddy saca el certificado HTTPS solo
 ## Siguientes fases
 
 2. ~~Video grabado~~ ✅
-3. Encuadre vertical que sigue a quien habla, pantalla dividida, modo gameplay, subtítulos karaoke, render con NVENC.
+3. ~~Encuadre vertical y subtítulos~~ ✅
 4. Directos en vivo con streamlink, chat, "¡Clip ahora!", notificaciones push.
 5. Selección con IA (Claude / OpenAI / Gemini) con reglas virales y reglas propias.
 6. Editor web táctil.

@@ -1,7 +1,9 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field, field_validator
 
 from app.models import JobSource, JobStatus, Role
 
@@ -81,10 +83,85 @@ class ActivityOut(BaseModel):
     created_at: datetime
 
 
+Rect = list[float]
+
+
+class GameplayRects(BaseModel):
+    cam: Rect | None = None    # [x, y, w, h], 0..1 of the source frame
+    game: Rect | None = None
+
+    @field_validator("cam", "game")
+    @classmethod
+    def _rect(cls, v):
+        if v is None:
+            return v
+        if len(v) != 4 or not all(0 <= x <= 1 for x in v) or v[2] < 0.02 or v[3] < 0.02:
+            raise ValueError("rect must be [x, y, w, h] within 0..1")
+        return [round(x, 4) for x in v]
+
+
+class RenderOptions(BaseModel):
+    format: Literal["9:16", "4:5", "1:1", "16:9"] = "9:16"
+    layout: Literal["auto", "follow", "split", "gameplay", "fit"] = "auto"
+    framing: Literal["fixed", "smooth", "dynamic", "zoom"] = "smooth"
+    subtitles: bool = True
+    style_id: str = "preset:clasico"      # "preset:<key>" or a saved style's id
+    music_id: uuid.UUID | None = None
+    music_volume: float = Field(default=0.15, ge=0, le=1)
+    logo_id: uuid.UUID | None = None
+    logo_position: Literal["top-left", "top-right"] = "top-right"
+    gameplay: GameplayRects | None = None
+    person: int | None = Field(default=None, ge=0)
+
+
 class JobFromUrlIn(BaseModel):
     url: str = Field(max_length=2048)
     clip_count: int = Field(default=5, ge=1, le=30)
     clip_duration: int = Field(default=45, ge=10, le=180)
+    render: RenderOptions = RenderOptions()
+
+
+_HEX = r"^#[0-9a-fA-F]{6}$"
+
+
+class StyleConfig(BaseModel):
+    font: Literal["montserrat-black", "montserrat-extrabold", "montserrat-bold", "bebas"] = "montserrat-black"
+    size: int = Field(default=78, ge=30, le=140)
+    text_color: str = Field(default="#FFFFFF", pattern=_HEX)
+    highlight_color: str = Field(default="#FFE600", pattern=_HEX)
+    outline_color: str = Field(default="#000000", pattern=_HEX)
+    outline: int = Field(default=6, ge=0, le=12)
+    shadow: int = Field(default=2, ge=0, le=8)
+    uppercase: bool = True
+    words_per_line: int = Field(default=3, ge=1, le=6)
+    animation: Literal["none", "highlight", "pop"] = "pop"
+    position: Literal["bottom", "middle", "top"] = "bottom"
+
+
+class StyleIn(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    config: StyleConfig
+
+
+class StyleOut(BaseModel):
+    id: str
+    name: str
+    preset: bool
+    config: StyleConfig
+
+
+class LibraryItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    kind: str
+    name: str
+    size: int
+    created_at: datetime
+
+
+class PersonOut(BaseModel):
+    id: int
+    seconds: float
 
 
 class ClipOut(BaseModel):
@@ -97,6 +174,10 @@ class ClipOut(BaseModel):
     score: float
     reasons: list[str]
     text: str
+    render: dict
+    layout: str | None
+    render_status: str
+    version: int
     created_at: datetime
 
     @computed_field
@@ -107,6 +188,7 @@ class ClipOut(BaseModel):
 
 class MoreClipsIn(BaseModel):
     count: int = Field(default=3, ge=1, le=20)
+    person: int | None = Field(default=None, ge=0)   # only moments where this person talks
 
 
 class JobOut(BaseModel):
@@ -119,6 +201,8 @@ class JobOut(BaseModel):
     original_filename: str | None
     clip_count: int
     clip_duration: int
+    render: dict
+    focus_person: int | None
     status: JobStatus
     progress: int
     stage: str

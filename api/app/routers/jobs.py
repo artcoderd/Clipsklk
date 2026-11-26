@@ -13,10 +13,14 @@ from app import activity, events
 from app.config import get_settings
 from app.db import get_db
 from app.deps import get_current_user
-from app.models import Clip, Job, JobSource, JobStatus, User
+from app.models import Clip, Job, JobSource, JobStatus, MediaAsset, User
 from app.platforms import detect_platform
 from app.redis_client import get_redis
-from app.schemas import ClipOut, JobFromUrlIn, JobOut, MoreClipsIn
+from pydantic import ValidationError
+
+from app.render_options import validate_render
+from app.routers.clips import _serve
+from app.schemas import ClipOut, JobFromUrlIn, JobOut, MoreClipsIn, PersonOut, RenderOptions
 from app.storage import StorageError, get_storage
 from app.worker import enqueue_job
 
@@ -49,7 +53,8 @@ def create_from_url(data: JobFromUrlIn, request: Request, user: User = Depends(g
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "unsupported_url")
     _check_quota(db, user)
     job = Job(user_id=user.id, source=JobSource.url, source_url=data.url.strip(), platform=platform,
-              clip_count=data.clip_count, clip_duration=data.clip_duration)
+              clip_count=data.clip_count, clip_duration=data.clip_duration,
+              render=validate_render(db, user.id, data.render))
     db.add(job)
     db.flush()
     activity.log(db, "job_created", user.id, request, job=str(job.id), source="url", platform=platform)
@@ -60,10 +65,14 @@ def create_from_url(data: JobFromUrlIn, request: Request, user: User = Depends(g
 
 @router.post("/upload", response_model=JobOut, status_code=201)
 def create_from_upload(request: Request, file: UploadFile = File(...), clip_count: int = Form(5),
-                       clip_duration: int = Form(45), user: User = Depends(get_current_user),
-                       db: Session = Depends(get_db)):
+                       clip_duration: int = Form(45), render: str = Form("{}"),
+                       user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if not 1 <= clip_count <= 30 or not 10 <= clip_duration <= 180:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "invalid_clip_options")
+    try:
+        render_opts = validate_render(db, user.id, RenderOptions.model_validate_json(render or "{}"))
+    except ValidationError:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "invalid_render_options")
     name = PurePath(file.filename or "video").name[:255]
     ext = PurePath(name).suffix.lower()
     if ext not in ALLOWED_EXT:
@@ -71,7 +80,7 @@ def create_from_upload(request: Request, file: UploadFile = File(...), clip_coun
     _check_quota(db, user)
 
     job = Job(user_id=user.id, source=JobSource.upload, original_filename=name,
-              clip_count=clip_count, clip_duration=clip_duration)
+              clip_count=clip_count, clip_duration=clip_duration, render=render_opts)
     db.add(job)
     db.flush()
     key = f"users/{user.id}/jobs/{job.id}/source{ext}"
@@ -116,13 +125,54 @@ def more_clips(job_id: uuid.UUID, data: MoreClipsIn, request: Request,
     if job.asset_id is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "job_not_ready")
     _check_quota(db, user)
+    if data.person is not None:
+        asset = db.get(MediaAsset, job.asset_id)
+        if not any(p["id"] == data.person for p in (asset.people or [])):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "person_not_found")
     done = db.scalar(select(func.count()).select_from(Clip).where(Clip.job_id == job.id))
     job.clip_count = done + data.count
+    job.focus_person = data.person
     job.status, job.stage, job.progress, job.error = JobStatus.queued, "queued", 75, None
     activity.log(db, "job_more_clips", user.id, request, job=str(job.id), count=data.count)
     db.commit()
     enqueue_job(job.id)
     return job
+
+
+def _asset(db: Session, job: Job) -> MediaAsset:
+    asset = db.get(MediaAsset, job.asset_id) if job.asset_id else None
+    if asset is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not_found")
+    return asset
+
+
+@router.get("/{job_id}/people", response_model=list[PersonOut])
+def list_people(job_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """People seen in the video (most visible first), to make clips of just one."""
+    job = _own_job(db, user, job_id)
+    if not job.asset_id:
+        return []
+    return [PersonOut(id=p["id"], seconds=p["seconds"]) for p in (_asset(db, job).people or [])
+            if p.get("thumb_key")]
+
+
+@router.get("/{job_id}/people/{person_id}/thumbnail")
+def person_thumbnail(job_id: uuid.UUID, person_id: int, user: User = Depends(get_current_user),
+                     db: Session = Depends(get_db)):
+    asset = _asset(db, _own_job(db, user, job_id))
+    p = next((p for p in (asset.people or []) if p["id"] == person_id and p.get("thumb_key")), None)
+    if p is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not_found")
+    return _serve(p["thumb_key"], "image/jpeg")
+
+
+@router.get("/{job_id}/preview")
+def preview_frame(job_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """A frame of the source video, to draw the gameplay camera/game areas on."""
+    asset = _asset(db, _own_job(db, user, job_id))
+    if not asset.preview_key:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not_found")
+    return _serve(asset.preview_key, "image/jpeg")
 
 
 @router.get("/{job_id}/events")

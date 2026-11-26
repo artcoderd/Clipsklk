@@ -1,14 +1,18 @@
 import re
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import get_current_user
-from app.models import Clip, Job, User
+from app import activity
+from app.models import Clip, Job, MediaAsset, User
+from app.render_options import validate_render
+from app.schemas import ClipOut, RenderOptions
 from app.storage import get_storage
+from app.worker import enqueue_rerender
 
 router = APIRouter(prefix="/clips", tags=["clips"])
 
@@ -53,3 +57,27 @@ def clip_thumbnail(clip_id: uuid.UUID, user: User = Depends(get_current_user), d
     if not clip.thumbnail_key:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "not_found")
     return _serve(clip.thumbnail_key, "image/jpeg")
+
+
+@router.get("/{clip_id}", response_model=ClipOut)
+def get_clip(clip_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return _own_clip(db, user, clip_id)
+
+
+@router.post("/{clip_id}/render", response_model=ClipOut)
+def rerender(clip_id: uuid.UUID, opts: RenderOptions, request: Request, user: User = Depends(get_current_user),
+             db: Session = Depends(get_db)):
+    """Render this clip again with other options (format, layout, subtitles, music...)."""
+    clip = _own_clip(db, user, clip_id)
+    if clip.render_status == "rendering":
+        raise HTTPException(status.HTTP_409_CONFLICT, "clip_busy")
+    job = db.get(Job, clip.job_id)
+    asset = db.get(MediaAsset, job.asset_id) if job and job.asset_id else None
+    if asset is None or not asset.storage_key:
+        raise HTTPException(status.HTTP_409_CONFLICT, "job_not_ready")
+    clip.render = validate_render(db, user.id, opts)
+    clip.render_status = "rendering"
+    activity.log(db, "clip_rerender", user.id, request, clip=str(clip.id))
+    db.commit()
+    enqueue_rerender(clip.id)
+    return clip

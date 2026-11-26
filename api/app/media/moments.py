@@ -70,10 +70,17 @@ def _text(transcript: dict, a: float, b: float) -> str:
 
 
 def select_moments(analysis: dict, transcript: dict, count: int, clip_seconds: float, total: float,
-                   exclude: list[tuple[float, float]] | None = None) -> list[Moment]:
+                   exclude: list[tuple[float, float]] | None = None,
+                   focus: np.ndarray | None = None) -> list[Moment]:
+    """`focus` (optional, per second 0..1): where the chosen person is the one
+    talking. Only windows where they speak most of the time are kept."""
     exclude = list(exclude or [])
     n = max(1, int(np.ceil(total)))
-    if total <= clip_seconds * 1.1:
+    if focus is not None:
+        f = np.zeros(n, np.float32)
+        f[: min(n, len(focus))] = np.asarray(focus, np.float32)[:n]
+        focus = f
+    if total <= clip_seconds * 1.1 and focus is None:
         if _overlaps(0, total, exclude):
             return []
         return [Moment(0.0, round(total, 2), 0.5, ["video completo"], _text(transcript, 0, total))]
@@ -89,6 +96,10 @@ def select_moments(analysis: dict, transcript: dict, count: int, clip_seconds: f
     scream, volume = sig("scream"), sig("volume")
     silence = sig("silence")
     raw = W_LAUGH * laugh + W_SCREAM * scream + W_VOLUME * volume + W_EXCLAIM * t_excl
+    if focus is not None:
+        # Peaks only count where the chosen person is talking; a little base
+        # interest keeps calm stretches of them talking eligible.
+        raw = (raw + 0.05) * focus
     smooth = np.convolve(raw, np.ones(3) / 3, mode="same")
     starts, ends = _boundaries(transcript)
 
@@ -117,11 +128,18 @@ def select_moments(analysis: dict, transcript: dict, count: int, clip_seconds: f
         if not (0.75 * clip_seconds <= length <= 1.2 * clip_seconds) or _overlaps(start, end, taken, gap=0):
             continue
         a, b = int(start), max(int(start) + 1, int(end))
+        if focus is not None:
+            talking = speech[a:b] > 0
+            share = float(focus[a:b][talking].mean()) if talking.any() else 0.0
+            if share < 0.6:
+                continue
         score = (0.6 * float(raw[a:b].max()) + 0.4 * float(smooth[a:b].mean())
                  + 0.1 * float(speech[a:b].mean()) - 0.3 * float(silence[a:b].mean()))
         reasons = [label for label, arr, th in (("risas", laugh, 0.5), ("gritos", scream, 0.5),
                                                 ("volumen", volume, 0.6), ("emoción", t_excl, 0.5))
                    if arr[a:b].max() >= th] or ["conversación"]
+        if focus is not None:
+            reasons.append("persona")
         chosen.append(Moment(round(start, 2), round(end, 2), round(max(0.0, score), 3), reasons,
                              _text(transcript, start, end)))
         taken.append((start, end))

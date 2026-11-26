@@ -5,12 +5,13 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { ClipCard } from "@/components/ClipCard";
+import { ClipEditor } from "@/components/ClipEditor";
 import { jobTitle } from "@/components/JobCard";
 import { Loading, Shell } from "@/components/Shell";
 import { Button, Card, ErrorText, ProgressBar } from "@/components/ui";
 import {
   api, errorMessage, JOB_ERRORS, PLATFORM_LABELS, STAGE_LABELS,
-  type Clip, type Job, type JobEvent,
+  type Clip, type Job, type JobEvent, type Person,
 } from "@/lib/api";
 import { useMe } from "@/lib/useMe";
 
@@ -29,10 +30,28 @@ export default function JobPage() {
   const [moreCount, setMoreCount] = useState(3);
   const [error, setError] = useState("");
   const [tick, setTick] = useState(0); // bump to reconnect after "more clips"
+  const [editing, setEditing] = useState<Clip | null>(null);
+  const [people, setPeople] = useState<Person[]>([]);
+  const [person, setPerson] = useState<number | null>(null);
 
+  // New clips are added; re-rendered ones replace their old version.
   const addClip = useCallback((c: Clip) => {
-    setClips((prev) => (prev.some((p) => p.id === c.id) ? prev : [...prev, c].sort(byScore)));
+    setClips((prev) => [...prev.filter((p) => p.id !== c.id), c].sort(byScore));
   }, []);
+
+  // While a clip re-renders, check on it every few seconds.
+  const renderingIds = clips.filter((c) => c.render_status === "rendering").map((c) => c.id).join(",");
+  useEffect(() => {
+    if (!renderingIds) return;
+    const t = setInterval(() => {
+      renderingIds.split(",").forEach((cid) => api<Clip>(`/clips/${cid}`).then(addClip).catch(() => {}));
+    }, 2500);
+    return () => clearInterval(t);
+  }, [renderingIds, addClip]);
+
+  useEffect(() => {
+    if (user && job?.status === "done") api<Person[]>(`/jobs/${id}/people`).then(setPeople).catch(() => {});
+  }, [user, id, job?.status]);
 
   useEffect(() => {
     if (!user) return;
@@ -77,7 +96,7 @@ export default function JobPage() {
   async function more() {
     setError("");
     try {
-      setJob(await api<Job>(`/jobs/${id}/more`, { method: "POST", json: { count: moreCount } }));
+      setJob(await api<Job>(`/jobs/${id}/more`, { method: "POST", json: { count: moreCount, person } }));
       setTick((t) => t + 1);
     } catch (e) {
       setError(errorMessage(e));
@@ -138,8 +157,28 @@ export default function JobPage() {
                   ))}
                 </select>
                 <Button onClick={more} variant="ghost" className="flex-1">
-                  Más clips de este video
+                  {person === null ? "Más clips de este video" : "Más clips de esta persona"}
                 </Button>
+              </div>
+            )}
+            {job.status === "done" && people.length > 1 && (
+              <div className="space-y-2">
+                <p className="text-sm text-white/70">Clips solo de una persona</p>
+                <div className="flex gap-3 overflow-x-auto pb-1">
+                  {people.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => setPerson(person === p.id ? null : p.id)}
+                      aria-pressed={person === p.id}
+                      aria-label={`Persona ${p.id + 1}`}
+                      className={`shrink-0 overflow-hidden rounded-full border-2 transition ${person === p.id ? "border-fuchsia-400 ring-4 ring-fuchsia-500/30" : "border-white/10 opacity-80"}`}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={`/api/jobs/${id}/people/${p.id}/thumbnail`} alt="" className="h-16 w-16 object-cover" />
+                    </button>
+                  ))}
+                </div>
+                {person !== null && <p className="text-xs text-white/50">Elige cuántos y toca “Más clips de esta persona”.</p>}
               </div>
             )}
             <ErrorText>{error}</ErrorText>
@@ -148,11 +187,14 @@ export default function JobPage() {
           {clips.length > 0 && (
             <section className="grid gap-4 sm:grid-cols-2">
               {clips.map((c) => (
-                <ClipCard key={c.id} clip={c} title={title} />
+                <ClipCard key={c.id} clip={c} title={title} onEdit={() => setEditing(c)} />
               ))}
             </section>
           )}
-          {busy && clips.length === 0 && job.stage === "cutting" && (
+          {editing && (
+            <ClipEditor clip={editing} jobId={id} onClose={() => setEditing(null)} onQueued={addClip} />
+          )}
+          {busy && clips.length === 0 && job.stage === "rendering" && (
             <p className="text-center text-sm text-white/50">Los clips aparecerán aquí a medida que estén listos…</p>
           )}
         </>

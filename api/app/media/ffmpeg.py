@@ -28,8 +28,16 @@ def probe(path: str | Path) -> dict:
     duration = float(data.get("format", {}).get("duration") or 0)
     if not audio or duration <= 0:
         raise PipelineError("no_audio" if duration > 0 else "invalid_media")
+    fps = None
+    if video:
+        num, _, den = (video.get("avg_frame_rate") or video.get("r_frame_rate") or "0/1").partition("/")
+        try:
+            fps = round(float(num) / float(den or 1), 3) or None
+        except (ValueError, ZeroDivisionError):
+            fps = None
     return {
         "duration": duration,
+        "fps": fps,
         "has_video": video is not None,
         "width": int(video["width"]) if video else None,
         "height": int(video["height"]) if video else None,
@@ -79,27 +87,13 @@ def _encoder_args(enc: str) -> list[str]:
     return ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21"]
 
 
-# Keep the long side at most 1920 px (phase 3 adds vertical reframing).
-_SCALE = "scale='if(gt(iw,ih),min(iw,1920),-2)':'if(gt(iw,ih),-2,min(ih,1920))'"
-
-
-def cut_clip(src: str | Path, start: float, end: float, dst: str | Path, has_video: bool) -> None:
-    dur = max(0.1, end - start)
-    if has_video:
-        inputs = ["-ss", f"{start:.3f}", "-i", str(src), "-t", f"{dur:.3f}"]
-        maps = ["-map", "0:v:0", "-map", "0:a:0", "-vf", f"{_SCALE},format=yuv420p"]
-    else:
-        # Audio-only source (podcast): black frame until phase 3 adds visuals.
-        inputs = ["-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", str(src),
-                  "-f", "lavfi", "-t", f"{dur:.3f}", "-i", "color=c=black:s=1280x720:r=30"]
-        maps = ["-map", "1:v:0", "-map", "0:a:0", "-pix_fmt", "yuv420p", "-shortest"]
-    args = [*inputs, *maps, *_encoder_args(video_encoder()),
-            "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-movflags", "+faststart", str(dst)]
-    run_with_progress(args, dur, None)
+def frame_image(src: str | Path, at: float, dst: str | Path, vf: str = "scale=640:-2") -> None:
+    """One JPEG frame at `at` seconds, through the filter `vf`."""
+    r = _run(["ffmpeg", "-hide_banner", "-v", "error", "-y", "-ss", f"{max(0.0, at):.3f}", "-i", str(src),
+              "-frames:v", "1", "-vf", vf, "-q:v", "4", str(dst)], 60)
+    if r.returncode != 0 or not Path(dst).exists():
+        raise PipelineError("ffmpeg_failed", r.stderr[-300:])
 
 
 def thumbnail(src: str | Path, at: float, dst: str | Path) -> None:
-    r = _run(["ffmpeg", "-hide_banner", "-v", "error", "-y", "-ss", f"{max(0.0, at):.3f}", "-i", str(src),
-              "-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "4", str(dst)], 60)
-    if r.returncode != 0:
-        raise PipelineError("ffmpeg_failed", r.stderr[-300:])
+    frame_image(src, at, dst, "scale=540:-2")

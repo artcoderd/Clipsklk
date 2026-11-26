@@ -4,10 +4,24 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 
 import { JobCard } from "@/components/JobCard";
+import { RenderOptionsForm } from "@/components/RenderOptionsForm";
 import { Loading, Shell } from "@/components/Shell";
 import { Button, Card, ErrorText, ProgressBar } from "@/components/ui";
-import { api, errorMessage, uploadVideo, type Job } from "@/lib/api";
+import { api, DEFAULT_RENDER, errorMessage, FORMAT_LABELS, LAYOUT_LABELS, uploadVideo, type Job,
+         type RenderOptions } from "@/lib/api";
+import { useLibrary } from "@/lib/useLibrary";
 import { useMe } from "@/lib/useMe";
+
+const OPTIONS_KEY = "clipeo.render";
+
+function loadOptions(): RenderOptions {
+  try {
+    const saved = JSON.parse(localStorage.getItem(OPTIONS_KEY) ?? "null");
+    // Gameplay rectangles belong to one video; don't carry them over.
+    if (saved) return { ...DEFAULT_RENDER, ...saved, gameplay: null };
+  } catch {}
+  return DEFAULT_RENDER;
+}
 
 const DURATIONS = [15, 30, 45, 60, 90];
 
@@ -24,6 +38,17 @@ export default function Home() {
   const [error, setError] = useState("");
   const [jobs, setJobs] = useState<Job[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
+  const [render, setRender] = useState<RenderOptions>(DEFAULT_RENDER);
+  const [showOptions, setShowOptions] = useState(false);
+  const library = useLibrary(!!user);
+
+  useEffect(() => setRender(loadOptions()), []);
+  function changeRender(r: RenderOptions) {
+    setRender(r);
+    try {
+      localStorage.setItem(OPTIONS_KEY, JSON.stringify(r));
+    } catch {}
+  }
 
   const loadJobs = useCallback(() => api<Job[]>("/jobs").then(setJobs).catch(() => {}), []);
 
@@ -44,7 +69,14 @@ export default function Home() {
     e.preventDefault();
     setError("");
     setBusy(true);
-    const opts = { clip_count: clipCount, clip_duration: clipDuration };
+    // Drop library items that no longer exist (deleted on another device).
+    const r = {
+      ...render,
+      music_id: library.music.some((m) => m.id === render.music_id) ? render.music_id : null,
+      logo_id: library.logos.some((l) => l.id === render.logo_id) ? render.logo_id : null,
+      style_id: library.styles.some((s) => s.id === render.style_id) ? render.style_id : DEFAULT_RENDER.style_id,
+    };
+    const opts = { clip_count: clipCount, clip_duration: clipDuration, render: r };
     try {
       let job: Job;
       if (tab === "link") {
@@ -155,6 +187,30 @@ export default function Home() {
                 ))}
               </div>
             </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-black/20">
+            <button
+              type="button"
+              onClick={() => setShowOptions((v) => !v)}
+              aria-expanded={showOptions}
+              className="flex min-h-12 w-full items-center justify-between px-4 text-left text-sm"
+            >
+              <span>
+                <b>Opciones del video</b>
+                <span className="block text-xs text-white/50">
+                  {FORMAT_LABELS[render.format].split(" ")[0]} · {LAYOUT_LABELS[render.layout]} ·{" "}
+                  {render.subtitles ? "con subtítulos" : "sin subtítulos"}
+                </span>
+              </span>
+              <span className={`transition ${showOptions ? "rotate-180" : ""}`}>⌄</span>
+            </button>
+            {showOptions && (
+              <div className="border-t border-white/10 p-4">
+                <RenderOptionsForm value={render} onChange={changeRender} styles={library.styles}
+                                   logos={library.logos} music={library.music} />
+              </div>
+            )}
           </div>
 
           {uploadPct !== null && (
