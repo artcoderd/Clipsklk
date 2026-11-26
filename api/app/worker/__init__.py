@@ -35,3 +35,7 @@ def enqueue_cover(clip_id) -> None:
 
 def enqueue_proxy(clip_id) -> None:
     _send("app.worker.tasks.prepare_proxy", clip_id)
+
+
+def enqueue_publish(publication_id) -> None:
+    _send("app.worker.tasks.publish_post", publication_id)

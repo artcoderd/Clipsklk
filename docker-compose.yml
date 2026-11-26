@@ -73,6 +73,33 @@ services:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
 
+  # Uploads clips to Facebook, Instagram, TikTok and Telegram (network-bound, no GPU).
+  publisher:
+    image: clipsklk-worker
+    pull_policy: never
+    restart: unless-stopped
+    command: celery -A app.worker.celery_app worker -Q publish --loglevel=info --concurrency=3 --prefetch-multiplier=1 -n publish@%h
+    env_file: .env
+    environment: *backend-env
+    volumes:
+      - storage:/data/storage
+    depends_on:
+      worker: { condition: service_started }
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  # Every minute: starts the publications whose scheduled time has come.
+  scheduler:
+    image: clipsklk-worker
+    pull_policy: never
+    restart: unless-stopped
+    command: celery -A app.worker.celery_app beat --loglevel=info --schedule /tmp/celerybeat-schedule
+    env_file: .env
+    environment: *backend-env
+    depends_on:
+      worker: { condition: service_started }
+      redis: { condition: service_healthy }
+
   web:
     build: ./web
     restart: unless-stopped

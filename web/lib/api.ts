@@ -107,6 +107,29 @@ export function aiStatusText(status: string | null, labels: Record<string, strin
   return `Esta vez ${why}; elegimos los clips con el análisis automático (risas, gritos, volumen).`;
 }
 
+export type Platform = "facebook" | "instagram" | "tiktok" | "telegram";
+export type SocialAccount = { id: string; platform: Platform; name: string; picture: string | null; status: string; last_error: string | null };
+export type Publication = {
+  id: string; clip_id: string; account_id: string; status: "scheduled" | "publishing" | "published" | "failed" | "canceled" | "draft_sent";
+  scheduled_at: string; caption: string; external_url: string | null; error: string | null; attempts: number; published_at: string | null;
+};
+export type SocialStatus = { meta: boolean; tiktok: boolean; telegram: boolean; tiktok_mode: "inbox" | "direct" };
+export const PLATFORM_NAMES: Record<Platform, string> = { facebook: "Facebook", instagram: "Instagram", tiktok: "TikTok", telegram: "Telegram" };
+export const PLATFORM_ICON: Record<Platform, string> = { facebook: "📘", instagram: "📸", tiktok: "🎵", telegram: "✈️" };
+export const PUB_STATUS: Record<Publication["status"], string> = {
+  scheduled: "Programado", publishing: "Publicando…", published: "Publicado", failed: "Falló",
+  canceled: "Cancelado", draft_sent: "En tus borradores",
+};
+export const PUB_ERRORS: Record<string, string> = {
+  account_expired: "la cuenta perdió el permiso: vuelve a conectarla",
+  instagram_processing_failed: "Instagram no pudo procesar el video",
+  instagram_processing_timeout: "Instagram tardó demasiado en procesar el video",
+  tiktok_publish_failed: "TikTok rechazó el video",
+  tiktok_privacy_required: "elige quién puede verlo en TikTok",
+  telegram_too_large: "el video pasa de 50 MB (límite de los bots de Telegram)",
+  publish_crashed: "error inesperado",
+};
+
 export type Style = { id: string; name: string; preset: boolean; config: StyleConfig };
 export type LibraryItem = { id: string; kind: "logo" | "music" | "image" | "sound"; name: string; size: number; created_at: string };
 export type Person = { id: number; seconds: number };
@@ -229,6 +252,15 @@ const MESSAGES: Record<string, string> = {
   live_not_active: "Este directo ya terminó.",
   ai_not_configured: "La IA no está configurada en el servidor.",
   edit_too_short: "El clip editado tiene que durar al menos 1 segundo.",
+  schedule_in_past: "Esa fecha ya pasó.",
+  schedule_too_far: "Solo se puede programar hasta 75 días en adelante.",
+  tiktok_privacy_required: "Elige quién puede ver el video en TikTok.",
+  telegram_bad_token: "Ese token de bot no es válido (cópialo de @BotFather).",
+  telegram_chat_failed: "El bot no encuentra ese chat. Añádelo al canal o grupo como administrador.",
+  telegram_bot_failed: "Telegram no reconoce ese bot. Revisa el token.",
+  telegram_failed: "No pudimos conectar con Telegram.",
+  provider_not_configured: "Esta red no está configurada en el servidor.",
+  not_cancellable: "Ya no se puede cancelar.",
   invalid_library_item: "Uno de los archivos ya no está en tu biblioteca.",
   no_text: "Este clip no tiene texto hablado.",
   ai_unavailable: "La IA no respondió. Inténtalo de nuevo.",

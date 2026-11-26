@@ -278,3 +278,45 @@ class AIUsage(Base):
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     cached_tokens: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class SocialAccount(Base):
+    """A connected destination: a Facebook Page, an Instagram professional
+    account, a TikTok account or a Telegram chat (via the user's bot)."""
+    __tablename__ = "social_accounts"
+    __table_args__ = (UniqueConstraint("user_id", "platform", "external_id", name="uq_social_account"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    platform: Mapped[str] = mapped_column(String(16))          # facebook | instagram | tiktok | telegram
+    external_id: Mapped[str] = mapped_column(String(128))
+    name: Mapped[str] = mapped_column(String(200))
+    picture: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token_enc: Mapped[str] = mapped_column(Text)               # encrypted (app.social.crypto)
+    refresh_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)      # page id, chat id...
+    status: Mapped[str] = mapped_column(String(16), default="ok")   # ok | expired | error
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Publication(Base):
+    """One clip going to one account, now or at a scheduled time."""
+    __tablename__ = "publications"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    clip_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clips.id", ondelete="CASCADE"), index=True)
+    account_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("social_accounts.id", ondelete="CASCADE"), index=True)
+    # scheduled | publishing | published | failed | canceled | draft_sent (TikTok inbox)
+    status: Mapped[str] = mapped_column(String(16), default="scheduled", index=True)
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    caption: Mapped[str] = mapped_column(Text, default="")
+    options: Mapped[dict] = mapped_column(JSON, default=dict)
+    external_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    external_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

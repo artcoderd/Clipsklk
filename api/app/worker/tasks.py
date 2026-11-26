@@ -718,3 +718,105 @@ def prepare_proxy(self, clip_id: str) -> None:
             events.publish(clip.job_id, "clip", ClipOut.model_validate(clip).model_dump(mode="json"))
         shutil.rmtree(work, ignore_errors=True)
         db.close()
+
+
+# --- Publishing -------------------------------------------------------------
+
+PLATFORM_LABEL = {"facebook": "Facebook", "instagram": "Instagram", "tiktok": "TikTok", "telegram": "Telegram"}
+MAX_ATTEMPTS = 3
+
+
+@celery_app.task(name="app.worker.tasks.publish_post", bind=True)
+def publish_post(self, publication_id: str) -> None:
+    """Uploads one clip to one account. Temporary platform errors are retried
+    (up to 3 attempts, a few minutes apart); an account whose permission was
+    revoked is marked so the user can reconnect it."""
+    from datetime import datetime, timezone
+
+    from app.models import Publication, SocialAccount
+    from app.social import meta, telegram, tiktok
+    from app.social.http import PlatformError
+    from app.social.tokens import access_token
+
+    db = SessionLocal()
+    work = Path(get_settings().work_dir) / f"pub-{publication_id}"
+    pub = None
+    try:
+        pub = db.get(Publication, uuid.UUID(publication_id))
+        if pub is None or pub.status != "publishing":
+            return
+        acc = db.get(SocialAccount, pub.account_id)
+        clip = db.get(Clip, pub.clip_id)
+        pub.attempts += 1
+        db.commit()
+        storage = get_storage()
+        video = storage.local_path(clip.storage_key)
+        if video is None:
+            work.mkdir(parents=True, exist_ok=True)
+            video = work / "clip.mp4"
+            storage.get_file(clip.storage_key, video)
+        try:
+            token = access_token(db, acc)
+            if acc.platform == "facebook":
+                res = meta.publish_facebook(token, acc.meta["page_id"], video, pub.caption)
+            elif acc.platform == "instagram":
+                cover_ms = int(clip.cover_t * 1000) if clip.cover_t is not None else None
+                res = meta.publish_instagram(token, acc.meta["ig_id"], video, pub.caption, cover_ms)
+            elif acc.platform == "tiktok":
+                res = tiktok.publish(token, video, pub.caption, pub.options or {})
+            elif acc.platform == "telegram":
+                res = telegram.publish(token, acc.meta["chat_id"], video, pub.caption)
+            else:
+                raise PlatformError("unknown_platform", acc.platform)
+        except PlatformError as e:
+            if e.code == "account_expired":
+                acc.status, acc.last_error = "expired", e.detail[:500]
+            if e.retry and pub.attempts < MAX_ATTEMPTS:
+                pub.error = e.code
+                db.commit()
+                self.apply_async(args=[publication_id], countdown=120 * pub.attempts)
+                return
+            pub.status, pub.error = "failed", e.code
+            db.commit()
+            _notify(db, pub.user_id, f"No se pudo publicar en {PLATFORM_LABEL.get(acc.platform, acc.platform)}",
+                    acc.name, f"/jobs/{clip.job_id}", f"pub-{pub.id}")
+            return
+        pub.status = "draft_sent" if res.get("draft") else "published"
+        pub.external_id, pub.external_url = res.get("id"), res.get("url")
+        pub.published_at, pub.error = datetime.now(timezone.utc), None
+        db.commit()
+        verb = "Enviado a tus borradores de" if res.get("draft") else "Publicado en"
+        _notify(db, pub.user_id, f"{verb} {PLATFORM_LABEL.get(acc.platform, acc.platform)} ✓", acc.name,
+                pub.external_url or f"/jobs/{clip.job_id}", f"pub-{pub.id}")
+    except Exception:
+        log.exception("publication %s crashed", publication_id)
+        if pub is not None:
+            db.rollback()
+            pub.status, pub.error = "failed", "publish_crashed"
+            db.commit()
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+        db.close()
+
+
+@celery_app.task(name="app.worker.tasks.dispatch_due")
+def dispatch_due() -> int:
+    """Runs every minute (celery beat): starts scheduled publications whose time came."""
+    from datetime import datetime, timezone
+
+    from app.models import Publication
+    from app.worker import enqueue_publish
+
+    db = SessionLocal()
+    try:
+        due = db.scalars(select(Publication).where(Publication.status == "scheduled",
+                                                   Publication.scheduled_at <= datetime.now(timezone.utc))
+                         .with_for_update(skip_locked=True)).all()
+        for pub in due:
+            pub.status = "publishing"
+        db.commit()
+        for pub in due:
+            enqueue_publish(pub.id)
+        return len(due)
+    finally:
+        db.close()

@@ -341,3 +341,41 @@ class EditDoc(BaseModel):
     sounds: list[EditSoundIn] = Field(default_factory=list, max_length=60)
     markers: list[EditMarkerIn] = Field(default_factory=list, max_length=100)
     music: EditMusicIn | None = None
+
+
+class SocialAccountOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    platform: str
+    name: str
+    picture: str | None
+    status: str
+    last_error: str | None
+    created_at: datetime
+
+
+class TelegramIn(BaseModel):
+    bot_token: str = Field(min_length=10, max_length=200)
+    chat_id: str = Field(min_length=1, max_length=64)
+
+
+class PublishIn(BaseModel):
+    account_ids: list[uuid.UUID] = Field(min_length=1, max_length=10)
+    caption: str = Field(default="", max_length=2200)
+    scheduled_at: datetime | None = None       # None = now
+    # TikTok: privacy_level (required for direct posts), allow_comment/duet/stitch
+    options: dict = Field(default_factory=dict)
+
+
+class PublicationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    clip_id: uuid.UUID
+    account_id: uuid.UUID
+    status: str
+    scheduled_at: datetime
+    caption: str
+    external_url: str | None
+    error: str | None
+    attempts: int
+    published_at: datetime | None

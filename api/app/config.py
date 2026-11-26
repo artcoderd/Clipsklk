@@ -71,6 +71,22 @@ class Settings(BaseSettings):
     ai_effort: str = "medium"               # Claude: low | medium | high
     live_ai_review_minutes: float = 5.0     # live: AI looks at the last minutes this often
 
+    # Publishing to social networks. App credentials come from each developer
+    # portal (Meta for Developers, TikTok for Developers); they are secrets.
+    meta_app_id: str | None = None
+    meta_app_secret: str | None = None
+    meta_graph_version: str = "v23.0"
+    tiktok_client_key: str | None = None
+    tiktok_client_secret: str | None = None
+    # "inbox": the video lands in the creator's TikTok drafts to finish there (works before
+    # TikTok audits the app). "direct": posts directly (needs the audited Direct Post scope).
+    tiktok_post_mode: str = "inbox"
+    # Telegram Bot API server. A self-hosted one (github.com/tdlib/telegram-bot-api)
+    # raises the bot upload limit from 50 MB to 2 GB.
+    telegram_api_base: str = "https://api.telegram.org"
+    # Key for encrypting the social tokens at rest; derived from SECRET_KEY if unset.
+    token_encryption_key: str | None = None
+
     # Web push (generate with: python -m app.cli vapid-keys)
     vapid_public_key: str | None = None
     vapid_private_key: str | None = None

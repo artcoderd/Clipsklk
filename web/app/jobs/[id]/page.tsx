@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { ClipCard } from "@/components/ClipCard";
 import { ClipEditor } from "@/components/ClipEditor";
+import { PublishSheet } from "@/components/PublishSheet";
 import { jobTitle } from "@/components/JobCard";
 import { Loading, Shell } from "@/components/Shell";
 import { Button, Card, ErrorText, ProgressBar } from "@/components/ui";
@@ -14,6 +15,7 @@ import {
   type Clip, type Job, type JobEvent, type Person,
 } from "@/lib/api";
 import { useAI } from "@/lib/useAI";
+import { useSocial } from "@/lib/useSocial";
 import { useMe } from "@/lib/useMe";
 
 const FINAL = new Set(["done", "failed", "canceled"]);
@@ -26,6 +28,8 @@ export default function JobPage() {
   const { id } = useParams<{ id: string }>();
   const { user, loading } = useMe();
   const ai = useAI(!!user);
+  const social = useSocial(!!user);
+  const [publishing, setPublishing] = useState<Clip | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [clips, setClips] = useState<Clip[]>([]);
   const [missing, setMissing] = useState(false);
@@ -195,9 +199,14 @@ export default function JobPage() {
             <section className="grid gap-4 sm:grid-cols-2">
               {clips.map((c) => (
                 <ClipCard key={c.id} clip={c} title={title} onEdit={() => setEditing(c)} onChange={addClip}
-                          aiAvailable={ai.available} />
+                          aiAvailable={ai.available} pubs={social.pubs.filter((p) => p.clip_id === c.id)}
+                          accounts={social.accounts} onPublish={() => setPublishing(c)} />
               ))}
             </section>
+          )}
+          {publishing && (
+            <PublishSheet clip={publishing} accounts={social.accounts} status={social.status}
+                          onClose={() => setPublishing(null)} onDone={() => setTimeout(social.reload, 300)} />
           )}
           {editing && (
             <ClipEditor clip={editing} jobId={id} onClose={() => setEditing(null)} onQueued={addClip} />

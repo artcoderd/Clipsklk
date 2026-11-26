@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useState } from "react";
 
-import { fmtTime, LAYOUT_LABELS, REASON_LABELS, type Clip } from "@/lib/api";
+import { fmtTime, LAYOUT_LABELS, PLATFORM_ICON, PUB_ERRORS, PUB_STATUS, REASON_LABELS, type Clip, type Publication,
+         type SocialAccount } from "@/lib/api";
 import { ClipText } from "./ClipText";
 
 async function shareClip(clip: Clip, title: string) {
@@ -25,8 +26,9 @@ async function shareClip(clip: Clip, title: string) {
 
 const ASPECT: Record<string, string> = { "9:16": "9 / 16", "4:5": "4 / 5", "1:1": "1 / 1", "16:9": "16 / 9" };
 
-export function ClipCard({ clip, title, onEdit, onChange, aiAvailable = false }: {
+export function ClipCard({ clip, title, onEdit, onChange, aiAvailable = false, pubs = [], accounts = [], onPublish }: {
   clip: Clip; title: string; onEdit?: () => void; onChange?: (c: Clip) => void; aiAvailable?: boolean;
+  pubs?: Publication[]; accounts?: SocialAccount[]; onPublish?: () => void;
 }) {
   const [sharing, setSharing] = useState(false);
   const canShare = typeof navigator !== "undefined" && "share" in navigator;
@@ -77,6 +79,26 @@ export function ClipCard({ clip, title, onEdit, onChange, aiAvailable = false }:
           <p className="text-xs text-white/40">
             {clip.render?.format} · {LAYOUT_LABELS[clip.layout as keyof typeof LAYOUT_LABELS] ?? clip.layout}
           </p>
+        )}
+        {pubs.filter((p) => p.status !== "canceled").length > 0 && (
+          <ul className="space-y-1 text-xs">
+            {pubs.filter((p) => p.status !== "canceled").map((p) => {
+              const a = accounts.find((x) => x.id === p.account_id);
+              return (
+                <li key={p.id} className={p.status === "failed" ? "text-red-300" : p.status === "published" || p.status === "draft_sent" ? "text-emerald-300" : "text-white/60"}>
+                  {a ? PLATFORM_ICON[a.platform] : "•"} {PUB_STATUS[p.status]}
+                  {p.status === "scheduled" && ` · ${new Date(p.scheduled_at).toLocaleString("es", { dateStyle: "short", timeStyle: "short" })}`}
+                  {p.status === "failed" && p.error && ` · ${PUB_ERRORS[p.error] ?? p.error}`}
+                  {p.external_url && <a href={p.external_url} target="_blank" rel="noreferrer" className="ml-1 underline">ver</a>}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {onPublish && clip.render_status === "ready" && (
+          <button onClick={onPublish} className="accent-gradient min-h-11 w-full rounded-2xl text-sm font-semibold">
+            📤 Publicar o programar
+          </button>
         )}
         {clip.render_status !== "rendering" && clip.version > 0 && (
           <Link href={`/clips/${clip.id}/editar`}

@@ -5,7 +5,7 @@ TikTok, Facebook) o subes un archivo, y recibes clips verticales con subtítulos
 Funciona desde el navegador en iPhone, Android, Windows y Mac, y se puede instalar
 en la pantalla de inicio (PWA).
 
-## Estado: Fases 1 a 6 ✅ (base, video grabado, encuadre vertical y subtítulos, directos en vivo, IA, editor web)
+## Estado: Fases 1 a 7 ✅ (base, video grabado, encuadre vertical y subtítulos, directos en vivo, IA, editor web, publicar)
 
 | Pieza | Qué hay |
 |---|---|
@@ -164,6 +164,33 @@ guardar = documento de edición (tiempos del video original) ─► render final
 - El **render final** lo hace el servidor con todo aplicado; los textos e imágenes quedan pegados al
   contenido: si después borras una frase, lo demás no se mueve de sitio.
 
+### Fase 7: publicar
+
+- **Descargar** y **compartir** con el menú nativo del teléfono (Web Share API), con el texto incluido.
+- **Facebook e Instagram** (API de Meta): conectas con Facebook Login; aparecen tus Páginas y la
+  cuenta profesional de Instagram vinculada a cada una. Reels subidos directamente a Meta (sin
+  necesidad de un enlace público al video); Instagram se publica cuando termina de procesarlo.
+- **TikTok** (Content Posting API): en modo `inbox` el video llega a tus borradores para
+  terminarlo en la app (funciona antes de la auditoría de TikTok); en modo `direct` se publica con
+  la privacidad que elijas de las que permite tu cuenta, como exigen las normas de TikTok.
+- **Telegram**: tu propio bot envía el clip a tu canal, grupo o chat (`TELEGRAM_API_BASE` permite
+  usar un servidor Bot API propio para pasar de 50 MB a 2 GB).
+- **Programar**: el servicio `scheduler` revisa cada minuto y el servicio `publisher` sube los
+  videos (cola propia, para no competir con la GPU ni con los directos).
+- **Seguridad**: los tokens de las redes se guardan cifrados; el `state` de OAuth es de un solo
+  uso y está ligado a tu sesión; cada usuario solo ve y usa sus propias cuentas.
+- **Fallos**: reintenta solo si la red falla un momento (3 intentos); si la cuenta perdió el
+  permiso queda marcada para volver a conectarla; notificación push con el resultado.
+
+**Antes de usar Meta y TikTok** hay que registrar las apps (Meta for Developers, TikTok for
+Developers) a tu nombre, poner las URI de redirección `<WEB_URL>/api/social/callback/meta` y
+`.../tiktok`, y pasar su revisión. Mientras tanto solo los administradores/testers de la app pueden
+conectar sus cuentas. Telegram, descargar y compartir funcionan desde ya.
+
+Probado contra servidores simulados que imitan las rutas y respuestas de Meta, TikTok y Telegram
+(no hay acceso real a esas plataformas en este entorno): conexión OAuth, subida, programación,
+reintentos, token caducado y renovación del token de TikTok.
+
 ## Arrancar en local
 
 Requisitos: Docker con Compose.
@@ -255,5 +282,5 @@ pon `SITE_ADDRESS=clipeo.app` en `.env` y Caddy saca el certificado HTTPS solo
 4. ~~Directos en vivo~~ ✅
 5. ~~Selección con IA~~ ✅
 6. ~~Editor web~~ ✅
-7. Publicar: descarga, compartir nativo, Meta, TikTok y Telegram.
+7. ~~Publicar~~ ✅
 8. Pagos con Stripe, límites por plan, correo, backups y despliegue con dominio.

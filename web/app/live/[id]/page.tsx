@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ActivityChart } from "@/components/ActivityChart";
 import { ClipCard } from "@/components/ClipCard";
 import { ClipEditor } from "@/components/ClipEditor";
+import { PublishSheet } from "@/components/PublishSheet";
 import { PushButton } from "@/components/PushButton";
 import { Loading, Shell } from "@/components/Shell";
 import { Button, Card, ErrorText } from "@/components/ui";
@@ -15,6 +16,7 @@ import {
   type Clip, type Live, type LiveActivity, type LiveEvent,
 } from "@/lib/api";
 import { useAI } from "@/lib/useAI";
+import { useSocial } from "@/lib/useSocial";
 import { useMe } from "@/lib/useMe";
 
 const ACTIVE = new Set(["starting", "waiting", "recording", "reconnecting"]);
@@ -24,6 +26,8 @@ export default function LivePage() {
   const { id } = useParams<{ id: string }>();
   const { user, loading } = useMe();
   const ai = useAI(!!user);
+  const social = useSocial(!!user);
+  const [publishing, setPublishing] = useState<Clip | null>(null);
   const [live, setLive] = useState<Live | null>(null);
   const [activity, setActivity] = useState<LiveActivity | null>(null);
   const [clips, setClips] = useState<Clip[]>([]);
@@ -188,9 +192,12 @@ export default function LivePage() {
       ) : (
         <section className="grid gap-4 sm:grid-cols-2">
           {clips.map((c) => <ClipCard key={c.id} clip={c} title="Directo" onEdit={() => setEditing(c)} onChange={upsert}
-                                      aiAvailable={ai.available} />)}
+                                      aiAvailable={ai.available} pubs={social.pubs.filter((p) => p.clip_id === c.id)}
+                                      accounts={social.accounts} onPublish={() => setPublishing(c)} />)}
         </section>
       )}
+      {publishing && <PublishSheet clip={publishing} accounts={social.accounts} status={social.status}
+                                   onClose={() => setPublishing(null)} onDone={() => setTimeout(social.reload, 300)} />}
       {editing && <ClipEditor clip={editing} jobId={live.job_id} onClose={() => setEditing(null)} onQueued={upsert} />}
     </Shell>
   );
