@@ -275,6 +275,16 @@ const MESSAGES: Record<string, string> = {
   too_many_styles: "Llegaste al máximo de estilos guardados.",
   library_full: "Tu biblioteca está llena. Borra algo primero.",
   job_not_ready: "Espera a que termine el primer procesamiento.",
+  no_minutes: "Te quedaste sin minutos. Mejora tu plan o compra minutos en «Plan».",
+  plan_no_live: "Tu plan no incluye directos. Mejóralo en «Plan».",
+  stripe_not_configured: "El pago con tarjeta todavía no está activo. Usa WhatsApp.",
+  not_buyable: "Eso no se puede comprar en línea.",
+  already_subscribed: "Ya tienes una suscripción. Cámbiala en «Administrar pago».",
+  no_stripe_customer: "Todavía no tienes pagos con tarjeta.",
+  stripe_error: "Stripe no respondió. Inténtalo de nuevo.",
+  has_stripe_subscription: "Este usuario paga con Stripe; su plan se cambia desde Stripe.",
+  free_required: "El plan gratis no se puede desactivar.",
+  bad_id: "El identificador solo puede tener minúsculas, números, - y _.",
 };
 
 /** Why a job failed (codes set by the worker). */
@@ -295,6 +305,35 @@ export const JOB_ERRORS: Record<string, string> = {
   render_failed: "Falló el render del clip. Inténtalo de nuevo.",
   ffmpeg_failed: "Falló el corte del video. Inténtalo de nuevo.",
   processing_failed: "Algo falló al procesar el video. Inténtalo de nuevo.",
+  no_minutes: "Te quedaste sin minutos para este video. Mejora tu plan o compra minutos en «Plan».",
+};
+
+export type PlanInfo = {
+  id: string;
+  name: string;
+  price_label: string;
+  monthly_minutes: number;
+  live: boolean;
+  ai: boolean;
+  max_active_jobs: number;
+  buyable: boolean;
+};
+export type PackInfo = { id: string; name: string; minutes: number; price_label: string; buyable: boolean };
+export type MyBilling = {
+  unlimited: boolean;
+  plan: PlanInfo;
+  source: "free" | "stripe" | "manual";
+  status: string;
+  period_start: string;
+  period_end: string | null;
+  cancel_at_period_end: boolean;
+  allowance: number;
+  used: number;
+  credits: number;
+  left: number;
+  stripe: boolean;
+  can_manage: boolean;
+  whatsapp: string | null;
 };
 
 export function errorMessage(err: unknown): string {

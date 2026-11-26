@@ -47,6 +47,10 @@ PASSWORD = "supersecret123"
 def _env(monkeypatch):
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
+    from app.billing import seed
+    _db = SessionLocal()
+    seed(_db)
+    _db.close()
     fake = fakeredis.FakeRedis(decode_responses=True)
     monkeypatch.setattr(redis_client, "get_redis", lambda: fake)
     for mod in ("app.ratelimit", "app.events", "app.routers.jobs", "app.worker.tasks", "app.routers.lives",
@@ -64,13 +68,18 @@ def client():
     return TestClient(app)
 
 
-def make_user(email, role=Role.user, totp=False):
+def make_user(email, role=Role.user, totp=False, plan="pro"):
+    """Test users are on "pro" unless a test is about plans (billing has its own tests)."""
+    from app.models import Subscription
     db = SessionLocal()
     u = User(email=email, password_hash=hash_password(PASSWORD), role=role)
     if totp:
         u.totp_secret = pyotp.random_base32()
         u.totp_enabled = True
     db.add(u)
+    db.flush()
+    if plan != "free":
+        db.add(Subscription(user_id=u.id, plan_id=plan, source="manual", status="active"))
     db.commit()
     db.close()
     return u

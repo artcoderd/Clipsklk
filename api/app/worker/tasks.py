@@ -174,6 +174,19 @@ def _prepare_asset(db, job: Job, asset: MediaAsset, prog: Progress, work: Path) 
             meta["duration"], meta["width"], meta["height"], meta["has_video"], meta["fps"])
         db.commit()
 
+    if not asset.transcript_key and not job.prepaid:
+        # Pay for the processing before the expensive part (transcription). A video
+        # already processed (same link, "más clips") is never charged again.
+        from app.billing import NoMinutes, charge, minutes_for
+        from app.models import User
+        try:
+            charge(db, db.get(User, job.user_id), minutes_for(asset.duration), f"asset:{asset.id}",
+                   f"Video de {minutes_for(asset.duration)} min")
+            db.commit()
+        except NoMinutes:
+            db.rollback()
+            raise PipelineError("no_minutes")
+
     if not (asset.transcript_key and asset.analysis_key):
         src = src or _source_file(asset, work)
         wav = work / "audio.wav"
@@ -413,10 +426,25 @@ def process_job(self, job_id: str) -> None:
         db.close()
 
 
+def _refund_unprocessed(db, job: Job) -> None:
+    """Charged but never transcribed (the job failed): give the minutes back."""
+    from app.billing import grant
+    from app.models import CreditEntry
+
+    asset = db.get(MediaAsset, job.asset_id) if job.asset_id else None
+    if asset is None or asset.transcript_key:
+        return
+    paid = db.scalars(select(CreditEntry).where(CreditEntry.ref.in_((f"asset:{asset.id}", f"asset:{asset.id}:credits")))).all()
+    total = -sum(e.minutes for e in paid)
+    if total > 0 and grant(db, job.user_id, total, "refund", f"refund:asset:{asset.id}", "Devolución: el video falló"):
+        db.commit()
+
+
 def _fail(db, job: Job | None, code: str) -> None:
     if job is None:
         return
     db.rollback()
+    _refund_unprocessed(db, job)
     # Clips left half-made by the failure are marked so the web can offer a retry.
     for c in db.scalars(select(Clip).where(Clip.job_id == job.id, Clip.render_status == "rendering")):
         c.render_status = "failed" if c.storage_key else c.render_status

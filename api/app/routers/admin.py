@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import activity
+from app import activity, mailer
 from app.config import get_settings
 from app.db import get_db
 from app.deps import require_admin
@@ -62,8 +62,8 @@ def create_invitation(data: InvitationCreateIn, request: Request,
     activity.log(db, "invitation_created", admin.id, request, email=email, role=data.role.value)
     db.commit()
     link = f"{s.web_url.rstrip('/')}/register?token={raw}"
-    # TODO(phase 8): send the link by email (SMTP / Resend). For now the admin copies it.
-    return InvitationCreatedOut(**InvitationOut.model_validate(inv).model_dump(), link=link)
+    sent = mailer.invitation(email, link, s.invitation_ttl_days) if data.send_email else False
+    return InvitationCreatedOut(**InvitationOut.model_validate(inv).model_dump(), link=link, emailed=sent)
 
 
 @router.delete("/invitations/{inv_id}", status_code=204)

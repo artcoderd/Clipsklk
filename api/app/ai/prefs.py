@@ -20,6 +20,11 @@ def resolve(db: Session, user_id: uuid.UUID, job_ai: dict | None = None) -> tupl
     use = job_ai.get("use_ai")
     use = prefs.use_ai if use is None else bool(use)
     available = configured()
+    from app.billing import plan_of
+    from app.models import User
+    user = db.get(User, user_id)
+    if user is not None and not user.is_admin and not plan_of(db, user_id).ai:
+        available = []    # the plan doesn't include AI
     provider = None
     if use and available:
         for p in (prefs.provider, get_settings().ai_provider, *available):

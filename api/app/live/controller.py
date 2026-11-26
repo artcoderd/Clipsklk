@@ -144,6 +144,7 @@ class LiveController:
         review_every = s.live_ai_review_minutes * 60
         ai_review = bool(self._ai_review and ai_configured() and review_every > 0)
         last_review = 0.0
+        charged_min, out_of_minutes = 0, False
         clip_now: list[tuple[float, int]] = []   # (wall time of the tap, seconds)
         last_status = last_beat = 0.0
         try:
@@ -189,7 +190,14 @@ class LiveController:
                     end_t = self.timeline.duration
                     self._ai_review_window(user_id, max(0.0, last_review - 15), end_t)
                     last_review = end_t
-                # 6) status for the web + heartbeat
+                # 6) minutes: each recorded minute is charged as it happens; stop when they run out
+                while self.timeline.duration >= (charged_min + 1) * 60:
+                    if not self._charge_minute(user_id, charged_min):
+                        self.stop.set()
+                        out_of_minutes = True
+                        break
+                    charged_min += 1
+                # 7) status for the web + heartbeat
                 now = time.time()
                 if now - last_status >= 2:
                     last_status = now
@@ -203,7 +211,7 @@ class LiveController:
         finally:
             self.stop.set()
             rec_thread.join(timeout=60)
-        self._finish(result.get("reason", "stopped"), user_id)
+        self._finish("no_minutes" if out_of_minutes else result.get("reason", "stopped"), user_id)
 
     def _queue_segment(self, seg: Segment) -> None:
         with self.seg_lock:
@@ -265,6 +273,21 @@ class LiveController:
         finally:
             db.close()
 
+    def _charge_minute(self, user_id, index: int) -> bool:
+        from app.billing import NoMinutes, charge
+        from app.models import User
+
+        db = SessionLocal()
+        try:
+            charge(db, db.get(User, user_id), 1, f"live:{self.sid}:{index}", "Minuto de directo")
+            db.commit()
+            return True
+        except NoMinutes:
+            db.rollback()
+            return False
+        finally:
+            db.close()
+
     def _ai_review_window(self, user_id, t0: float, t1: float) -> None:
         """Cuts [t0, t1] into its own source and asks the GPU worker's AI review to look at it."""
         from app.worker import enqueue_live_review
@@ -304,7 +327,7 @@ class LiveController:
                 get_storage().put_file(key, rec, "video/mp4")
                 db = SessionLocal()
                 try:
-                    job = Job(user_id=user_id, source=JobSource.live, original_filename="Directo completo",
+                    job = Job(user_id=user_id, source=JobSource.live, original_filename="Directo completo", prepaid=True,
                               title="Directo · lo mejor", storage_key=key, clip_count=live.final_clips,
                               clip_duration=live.clip_duration, render=dict(live.render or {}))
                     db.add(job)

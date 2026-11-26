@@ -34,7 +34,7 @@ export function Shell({ user, children }: { user: User | null; children: ReactNo
       </header>
       {user && (
         <nav className="-mt-2 mb-6 flex gap-1 overflow-x-auto text-sm" aria-label="Secciones">
-          {[["/", "Proyectos"], ["/estilos", "Estilos"], ["/biblioteca", "Biblioteca"], ["/publicar", "Publicar"], ["/ia", "IA"]].map(([href, label]) => (
+          {[["/", "Proyectos"], ["/estilos", "Estilos"], ["/biblioteca", "Biblioteca"], ["/publicar", "Publicar"], ["/ia", "IA"], ["/planes", "Plan"]].map(([href, label]) => (
             <Link key={href} href={href} className="shrink-0 rounded-xl px-3 py-2 text-white/60 hover:bg-white/8 hover:text-white">
               {label}
             </Link>

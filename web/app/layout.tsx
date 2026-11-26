@@ -2,10 +2,12 @@ import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 
 import { ServiceWorker } from "@/components/ServiceWorker";
+import { SITE_URL } from "@/lib/site";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Clipeo — clips verticales con subtítulos",
+  metadataBase: new URL(SITE_URL),
+  title: { default: "Clipeo — clips verticales con subtítulos", template: "%s · Clipeo" },
   description:
     "Pega el link de un video o directo y recibe clips verticales con subtítulos listos para TikTok, Reels y Shorts.",
   applicationName: "Clipeo",

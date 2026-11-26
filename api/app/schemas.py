@@ -51,6 +51,7 @@ class InvitationLookupOut(BaseModel):
 class InvitationCreateIn(BaseModel):
     email: EmailStr
     role: Role = Role.user
+    send_email: bool = True
 
 
 class InvitationOut(BaseModel):
@@ -66,6 +67,7 @@ class InvitationOut(BaseModel):
 
 class InvitationCreatedOut(InvitationOut):
     link: str  # shown once, so the admin can copy it if email is not configured
+    emailed: bool = False
 
 
 class UserUpdateIn(BaseModel):

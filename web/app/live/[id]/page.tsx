@@ -181,6 +181,11 @@ export default function LivePage() {
           </Link>
         )}
         {live.status === "finishing" && <p className="text-sm text-white/60">Juntando la grabación completa…</p>}
+        {live.end_reason === "no_minutes" && (
+          <p className="text-sm text-amber-200">
+            La grabación se detuvo porque te quedaste sin minutos. <a href="/planes" className="underline">Ver planes</a>
+          </p>
+        )}
         <ErrorText>{error}</ErrorText>
       </Card>
 

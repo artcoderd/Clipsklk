@@ -114,6 +114,8 @@ class Job(Base):
     render: Mapped[dict] = mapped_column(JSON, default=dict)
     # "Clips of one person": the person id the next clips must focus on.
     focus_person: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Already paid for (the final recording of a live stream was charged minute by minute).
+    prepaid: Mapped[bool] = mapped_column(default=False)
     # AI options for this project: {"use_ai": bool, "rules": str}
     ai: Mapped[dict] = mapped_column(JSON, default=dict)
     # How the last selection went: "ai:<provider>" or "fallback:<reason>" (shown to the user).
@@ -320,3 +322,72 @@ class Publication(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Plan(Base):
+    """A subscription plan. Minutes = minutes of source video processed per period."""
+    __tablename__ = "plans"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)     # free | creador | pro ...
+    name: Mapped[str] = mapped_column(String(60))
+    price_label: Mapped[str] = mapped_column(String(40), default="")   # shown as is: "US$19/mes"
+    price_cents: Mapped[int] = mapped_column(Integer, default=0)       # for revenue estimates
+    monthly_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    live: Mapped[bool] = mapped_column(default=False)
+    ai: Mapped[bool] = mapped_column(default=True)
+    max_active_jobs: Mapped[int] = mapped_column(Integer, default=2)
+    stripe_price_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    active: Mapped[bool] = mapped_column(default=True)
+    sort: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class CreditPack(Base):
+    """One-time purchase of extra minutes (they don't expire)."""
+    __tablename__ = "credit_packs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(String(60))
+    minutes: Mapped[int] = mapped_column(Integer)
+    price_label: Mapped[str] = mapped_column(String(40), default="")
+    price_cents: Mapped[int] = mapped_column(Integer, default=0)
+    stripe_price_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    active: Mapped[bool] = mapped_column(default=True)
+
+
+class Subscription(Base):
+    """The user's current plan and where it comes from (free, Stripe, or paid by hand)."""
+    __tablename__ = "subscriptions"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    plan_id: Mapped[str] = mapped_column(ForeignKey("plans.id"), default="free")
+    source: Mapped[str] = mapped_column(String(16), default="free")    # free | stripe | manual
+    status: Mapped[str] = mapped_column(String(24), default="active")  # active | past_due | canceled
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancel_at_period_end: Mapped[bool] = mapped_column(default=False)
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    stripe_subscription_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class CreditEntry(Base):
+    """Ledger of minutes: every grant and every use is a row (the balance is their sum)."""
+    __tablename__ = "credit_entries"
+    __table_args__ = (UniqueConstraint("kind", "ref", name="uq_credit_ref"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    # usage (plan minutes) | usage_credits | purchase | manual | refund
+    kind: Mapped[str] = mapped_column(String(16))
+    minutes: Mapped[float] = mapped_column(Float)          # + grants, - usage
+    ref: Mapped[str | None] = mapped_column(String(128), nullable=True)   # idempotency (asset id, stripe id...)
+    note: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class AppSetting(Base):
+    """Settings the owner changes from the panel (public sign-up, costs...)."""
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSON, default=dict)

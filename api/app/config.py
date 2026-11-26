@@ -87,6 +87,22 @@ class Settings(BaseSettings):
     # Key for encrypting the social tokens at rest; derived from SECRET_KEY if unset.
     token_encryption_key: str | None = None
 
+    # Payments. Stripe keys from dashboard.stripe.com (secret!). Webhook endpoint:
+    # <WEB_URL>/api/billing/webhook with events checkout.session.completed and
+    # customer.subscription.created/updated/deleted.
+    stripe_secret_key: str | None = None
+    stripe_webhook_secret: str | None = None
+    # Manual payments by WhatsApp (international format, digits only), e.g. 5215512345678.
+    whatsapp_number: str | None = None
+
+    # Outgoing email (invitations). Without SMTP the panel shows the link to copy.
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str | None = None
+    smtp_tls: bool = True
+
     # Web push (generate with: python -m app.cli vapid-keys)
     vapid_public_key: str | None = None
     vapid_private_key: str | None = None

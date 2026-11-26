@@ -50,8 +50,13 @@ def test_users_only_see_own_jobs(client):
 
 
 def test_active_job_quota(client):
-    make_user("u@x.com")
-    login(client, "u@x.com")
-    for _ in range(3):
+    make_user("pro@x.com")                       # Pro: 5 at a time
+    login(client, "pro@x.com")
+    for _ in range(5):
         assert client.post("/jobs", json={"url": "https://kick.com/x"}).status_code == 201
     assert client.post("/jobs", json={"url": "https://kick.com/x"}).status_code == 429
+    client.cookies.clear()
+    make_user("free@x.com", plan="free")         # Gratis: 1 at a time
+    login(client, "free@x.com")
+    assert client.post("/jobs", json={"url": "https://kick.com/x"}).status_code == 201
+    assert client.post("/jobs", json={"url": "https://kick.com/x"}).json()["detail"] == "too_many_active_jobs"

@@ -1,0 +1,14 @@
+# Production on the GPU server, with your domain and HTTPS:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.prod.yml up -d --build
+# Needs in .env: ENVIRONMENT=production, WEB_URL=https://<domain>, SITE_ADDRESS=<domain>,
+# a strong SECRET_KEY and POSTGRES_PASSWORD (see DEPLOY.md).
+services:
+  gateway:
+    ports: !override
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+  postgres:
+    ports: !reset []
+  redis:
+    ports: !reset []

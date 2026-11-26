@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import activity, ratelimit
+from app.billing import signup_open
 from app.config import get_settings
 from app.db import get_db
 from app.deps import get_current_user
@@ -47,8 +48,8 @@ def _valid_invitation(db: Session, token: str) -> Invitation | None:
 
 
 @router.get("/config")
-def public_config():
-    return {"public_signup": get_settings().public_signup}
+def public_config(db: Session = Depends(get_db)):
+    return {"public_signup": signup_open(db)}
 
 
 @router.get("/invitations/{token}", response_model=InvitationLookupOut)
@@ -71,7 +72,7 @@ def register(data: RegisterIn, request: Request, response: Response, db: Session
         if inv.email.lower() != email:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "invitation_email_mismatch")
         role = inv.role if inv.role != Role.owner else Role.user
-    elif not get_settings().public_signup:
+    elif not signup_open(db):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "invitation_required")
 
     if db.scalar(select(func.count()).select_from(User).where(User.email == email)):

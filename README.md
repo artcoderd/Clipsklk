@@ -5,7 +5,9 @@ TikTok, Facebook) o subes un archivo, y recibes clips verticales con subtítulos
 Funciona desde el navegador en iPhone, Android, Windows y Mac, y se puede instalar
 en la pantalla de inicio (PWA).
 
-## Estado: Fases 1 a 7 ✅ (base, video grabado, encuadre vertical y subtítulos, directos en vivo, IA, editor web, publicar)
+## Estado: Fases 1 a 8 ✅ (base, video grabado, encuadre vertical y subtítulos, directos en vivo, IA, editor web, publicar, pagos y lanzamiento)
+
+Para ponerlo en internet con tu dominio, pagos y copias de seguridad: **[DEPLOY.md](DEPLOY.md)**.
 
 | Pieza | Qué hay |
 |---|---|
@@ -191,6 +193,27 @@ Probado contra servidores simulados que imitan las rutas y respuestas de Meta, T
 (no hay acceso real a esas plataformas en este entorno): conexión OAuth, subida, programación,
 reintentos, token caducado y renovación del token de TikTok.
 
+### Fase 8: pagos y lanzamiento
+
+- **Planes** (Gratis 60 min/mes, Creador, Pro; editables desde el panel): minutos de video
+  al mes, directos sí/no, IA sí/no y videos a la vez. Se cobra la duración del video
+  original una sola vez; en directo, cada minuto grabado. Si un video falla, se devuelven
+  sus minutos. **Minutos extra** en paquetes que no caducan.
+- **Stripe:** pago con tarjeta (suscripción o paquete) con Checkout, portal del cliente para
+  cambiar de plan, la tarjeta o cancelar, y webhook firmado que mantiene el plan al día.
+- **WhatsApp:** botón «Pagar por WhatsApp» con el correo de la cuenta en el mensaje; tú
+  activas el plan por meses o añades minutos desde el panel y anotas el monto.
+- **Página «Plan»:** minutos usados y disponibles, renovación, planes, paquetes e historial.
+- **Panel:** ingresos estimados, costos (servidor, almacenamiento, IA, comisiones) y margen
+  del mes, costo por minuto, trabajos activos en vivo, plan y consumo por usuario, pago
+  manual, editor de planes y paquetes (con su `price id` de Stripe), registro público
+  activable y invitaciones por correo (SMTP).
+- **Página pública** en `/` para visitantes (SEO: metadatos, Open Graph con imagen, datos
+  estructurados de app y preguntas frecuentes, `sitemap.xml`, `robots.txt`), **Términos**
+  (la app y su código son propiedad del titular) y **Privacidad**.
+- **Despliegue:** `docker-compose.prod.yml` (puertos 80/443, HTTPS automático con Caddy,
+  cabeceras de seguridad y HSTS), copias de seguridad diarias y la guía [DEPLOY.md](DEPLOY.md).
+
 ## Arrancar en local
 
 Requisitos: Docker con Compose.
@@ -273,7 +296,10 @@ pon `SITE_ADDRESS=clipeo.app` en `.env` y Caddy saca el certificado HTTPS solo
   o en los secretos del servidor.
 - En producción (`ENVIRONMENT=production`) la API no arranca sin un `SECRET_KEY` de 32+ caracteres,
   la cookie se marca `Secure` y la documentación `/docs` se desactiva.
-- Copias de seguridad diarias de la base de datos: pendiente para el despliegue (fase 8).
+- Copias de seguridad diarias de la base de datos (servicio `backup`), cifradas con
+  `BACKUP_PASSPHRASE` y copiadas fuera del servidor con rclone si configuras `BACKUP_REMOTE`.
+- Los webhooks de Stripe se aceptan solo con firma válida; cada pago se aplica una sola vez.
+- Activar planes a mano, añadir minutos y editar planes es solo del dueño (con 2FA).
 
 ## Siguientes fases
 
@@ -283,4 +309,4 @@ pon `SITE_ADDRESS=clipeo.app` en `.env` y Caddy saca el certificado HTTPS solo
 5. ~~Selección con IA~~ ✅
 6. ~~Editor web~~ ✅
 7. ~~Publicar~~ ✅
-8. Pagos con Stripe, límites por plan, correo, backups y despliegue con dominio.
+8. ~~Pagos y lanzamiento~~ ✅

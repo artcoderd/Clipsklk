@@ -101,9 +101,31 @@ services:
       redis: { condition: service_healthy }
 
   web:
-    build: ./web
+    build:
+      context: ./web
+      args:
+        SITE_URL: ${WEB_URL:-http://localhost:8080}
+        SITE_OWNER: ${SITE_OWNER:-}
+        SITE_CONTACT: ${SITE_CONTACT:-}
     restart: unless-stopped
+    environment:
+      API_URL: http://api:8000          # landing page reads the public plans
     depends_on: [api]
+
+  # Daily database backups (see ops/backup/backup.sh and DEPLOY.md).
+  backup:
+    build: ./ops/backup
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PGHOST: postgres
+      PGUSER: clipeo
+      PGDATABASE: clipeo
+      PGPASSWORD: ${POSTGRES_PASSWORD:-clipeo}
+    volumes:
+      - backups:/backups
+    depends_on:
+      postgres: { condition: service_healthy }
 
   gateway:
     image: caddy:2-alpine
@@ -118,6 +140,7 @@ services:
     depends_on: [web, api]
 
 volumes:
+  backups:
   live:
   work:
   models:

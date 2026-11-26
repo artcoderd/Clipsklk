@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
+import { BillingAdmin } from "@/components/admin/BillingAdmin";
 import { Loading, Shell } from "@/components/Shell";
 import { Button, Card, ErrorText, Field } from "@/components/ui";
 import { api, ApiError, errorMessage, type Role, type User } from "@/lib/api";
@@ -16,6 +17,7 @@ type Invitation = {
   revoked_at: string | null;
   created_at: string;
   link?: string;
+  emailed?: boolean;
 };
 type Activity = { id: number; user_id: string | null; action: string; detail: Record<string, unknown>; ip: string | null; created_at: string };
 type AIUse = { provider: string; model: string; calls: number; input_tokens: number; output_tokens: number; cached_tokens: number };
@@ -85,6 +87,7 @@ export default function AdminPage() {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Role>("user");
   const [newLink, setNewLink] = useState("");
+  const [emailed, setEmailed] = useState(false);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
@@ -115,6 +118,7 @@ export default function AdminPage() {
     try {
       const inv = await api<Invitation>("/admin/invitations", { method: "POST", json: { email, role } });
       setNewLink(inv.link ?? "");
+      setEmailed(!!inv.emailed);
       setEmail("");
       load();
     } catch (err) {
@@ -193,6 +197,8 @@ export default function AdminPage() {
         </Card>
       )}
 
+      <BillingAdmin isOwner={isOwner} />
+
       <Card className="mb-6 space-y-4">
         <h2 className="text-lg font-semibold">Invitar a alguien</h2>
         <form onSubmit={invite} className="space-y-3 sm:flex sm:items-end sm:gap-3 sm:space-y-0">
@@ -212,7 +218,9 @@ export default function AdminPage() {
         </form>
         {newLink && (
           <div className="space-y-2 rounded-2xl bg-emerald-500/10 p-3">
-            <p className="text-sm text-emerald-200">Enlace de un solo uso (caduca en 7 días). Cópialo y envíalo:</p>
+            <p className="text-sm text-emerald-200">
+              {emailed ? "Le enviamos la invitación por correo. También puedes copiar el enlace" : "Enlace de un solo uso (caduca en 7 días). Cópialo y envíalo"}:
+            </p>
             <div className="flex gap-2">
               <input readOnly value={newLink} className="input-glass font-mono !text-xs" onFocus={(e) => e.target.select()} />
               <Button variant="ghost" type="button" onClick={() => navigator.clipboard.writeText(newLink)}>

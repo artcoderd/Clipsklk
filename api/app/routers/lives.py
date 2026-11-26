@@ -65,6 +65,12 @@ def start_live(data: LiveIn, request: Request, user: User = Depends(get_current_
     for live in db.scalars(select(LiveSession).where(LiveSession.user_id == user.id,
                                                      LiveSession.status.in_(ACTIVE))):
         _check_stale(db, live)
+    from app.billing import balance, plan_of, unlimited
+    if not unlimited(user):
+        if not plan_of(db, user.id).live:
+            raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, "plan_no_live")
+        if balance(db, user.id).total_left < 1:
+            raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, "no_minutes")
     active = db.scalar(select(func.count()).select_from(LiveSession).where(
         LiveSession.user_id == user.id, LiveSession.status.in_(ACTIVE)))
     if active >= get_settings().max_lives_per_user:

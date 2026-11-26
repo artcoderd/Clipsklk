@@ -30,11 +30,16 @@ FINAL = {"done", "failed", "canceled"}
 ALLOWED_EXT = {".mp4", ".mov", ".mkv", ".webm", ".m4v", ".avi", ".mp3", ".m4a", ".wav"}
 
 
-def _check_quota(db: Session, user: User) -> None:
+def _check_quota(db: Session, user: User, new_video: bool = True) -> None:
+    from app.billing import balance, plan_of, unlimited
+
     active = db.scalar(select(func.count()).select_from(Job).where(
-        Job.user_id == user.id, Job.status.in_([JobStatus.queued, JobStatus.running])))
-    if active >= get_settings().max_active_jobs_per_user:
+        Job.user_id == user.id, Job.status.in_([JobStatus.queued, JobStatus.running]), Job.source != JobSource.live))
+    limit = get_settings().max_active_jobs_per_user if unlimited(user) else plan_of(db, user.id).max_active_jobs
+    if active >= limit:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "too_many_active_jobs")
+    if new_video and not unlimited(user) and balance(db, user.id).total_left < 1:
+        raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, "no_minutes")
 
 
 def _own_job(db: Session, user: User, job_id: uuid.UUID) -> Job:
@@ -125,7 +130,7 @@ def more_clips(job_id: uuid.UUID, data: MoreClipsIn, request: Request,
         raise HTTPException(status.HTTP_409_CONFLICT, "job_busy")
     if job.asset_id is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "job_not_ready")
-    _check_quota(db, user)
+    _check_quota(db, user, new_video=False)
     if data.person is not None:
         asset = db.get(MediaAsset, job.asset_id)
         if not any(p["id"] == data.person for p in (asset.people or [])):
