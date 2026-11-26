@@ -190,6 +190,8 @@ class ClipOut(BaseModel):
     hashtags: list[str]
     ai_provider: str | None
     cover_rev: str | None
+    proxy_status: str
+    edited: bool
     created_at: datetime
 
     @computed_field
@@ -284,3 +286,58 @@ class ClipTextIn(BaseModel):
     title: str | None = Field(default=None, max_length=120)
     caption: str | None = Field(default=None, max_length=2200)
     hashtags: list[str] | None = Field(default=None, max_length=30)
+
+
+_ID = Field(min_length=1, max_length=24)
+
+
+class EditTextIn(BaseModel):
+    id: str = _ID
+    text: str = Field(min_length=1, max_length=120)
+    start: float
+    end: float
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    size: int = Field(default=90, ge=20, le=220)
+    color: str = Field(default="#FFFFFF", pattern=_HEX)
+    style: Literal["title", "label", "outline"] = "title"
+    box_color: str = Field(default="#000000", pattern=_HEX)
+
+
+class EditImageIn(BaseModel):
+    id: str = _ID
+    library_id: uuid.UUID
+    start: float
+    end: float
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    w: float = Field(ge=0.03, le=1)
+
+
+class EditSoundIn(BaseModel):
+    id: str = _ID
+    library_id: uuid.UUID
+    t: float
+    volume: float = Field(default=1.0, ge=0, le=2)
+
+
+class EditMusicIn(BaseModel):
+    library_id: uuid.UUID
+    volume: float = Field(default=0.15, ge=0, le=1)
+
+
+class EditMarkerIn(BaseModel):
+    id: str = _ID
+    t: float
+    label: str = Field(default="", max_length=40)
+
+
+class EditDoc(BaseModel):
+    """Times are seconds in the source video (see app/media/edit.py)."""
+    trim: list[float] = Field(min_length=2, max_length=2)
+    cuts: list[list[float]] = Field(default_factory=list, max_length=400)
+    texts: list[EditTextIn] = Field(default_factory=list, max_length=40)
+    images: list[EditImageIn] = Field(default_factory=list, max_length=20)
+    sounds: list[EditSoundIn] = Field(default_factory=list, max_length=60)
+    markers: list[EditMarkerIn] = Field(default_factory=list, max_length=100)
+    music: EditMusicIn | None = None

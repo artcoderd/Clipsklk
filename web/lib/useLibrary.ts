@@ -19,6 +19,8 @@ export function useLibrary(enabled = true) {
     styles,
     logos: items.filter((i) => i.kind === "logo"),
     music: items.filter((i) => i.kind === "music"),
+    images: items.filter((i) => i.kind === "image"),
+    sounds: items.filter((i) => i.kind === "sound"),
     reload,
   };
 }

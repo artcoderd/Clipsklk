@@ -47,6 +47,7 @@ class RenderSettings:
     logo_position: str = "top-right"
     gameplay: dict | None = None       # {"cam": [x,y,w,h], "game": [x,y,w,h]} normalised
     person: int | None = None           # keep the camera on this person (follow)
+    scale: float = 1.0                  # <1: editor preview copy (smaller, faster)
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +227,8 @@ class Composer:
                  samples: list[tuple[float, list[Face]]], who: list[int | None], has_video: bool):
         self.s = settings
         self.W, self.H = src_w, src_h
-        self.ow, self.oh = OUTPUT_SIZES.get(settings.format, OUTPUT_SIZES["9:16"])
+        bw, bh = OUTPUT_SIZES.get(settings.format, OUTPUT_SIZES["9:16"])
+        self.ow, self.oh = int(bw * settings.scale) // 2 * 2, int(bh * settings.scale) // 2 * 2
         self.aspect = self.ow / self.oh
         self.fps, self.start = fps, start
         layout = settings.layout
@@ -378,28 +380,130 @@ class Composer:
 # Encoding
 # ---------------------------------------------------------------------------
 
-def _audio_filter(has_music: bool, volume: float, duration: float) -> str:
-    voice = "[1:a]aresample=48000"
+def _audio_filter(has_music: bool, volume: float, duration: float,
+                  keeps: list[tuple[float, float]] | None = None,
+                  sounds: list[tuple[int, float, float]] | None = None, music_input: int = 2) -> str:
+    """Voice (input 1) -> only the kept pieces, joined; + music that ducks under
+    the voice; + sound effects (input index, output time, volume); loudness -14 LUFS."""
     norm = "loudnorm=I=-14:TP=-1.5:LRA=11"   # social-media loudness
-    if not has_music:
-        return f"{voice},{norm}[a]"
-    fade_out = max(0.0, duration - 1.0)
-    return (f"{voice},asplit=2[voice][sc];"
-            f"[2:a]aresample=48000,volume={volume:.3f},afade=t=in:d=0.6,afade=t=out:st={fade_out:.2f}:d=1[mus];"
-            # Music ducks automatically while someone talks.
-            f"[mus][sc]sidechaincompress=threshold=0.02:ratio=10:attack=15:release=350[duck];"
-            f"[voice][duck]amix=inputs=2:duration=first:normalize=0,{norm}[a]")
+    parts = []
+    if keeps and len(keeps) > 1:
+        n = len(keeps)
+        parts.append("[1:a]aresample=48000,asplit=" + str(n) + "".join(f"[p{i}]" for i in range(n)))
+        for i, (a, b) in enumerate(keeps):
+            parts.append(f"[p{i}]atrim=start={a:.3f}:end={b:.3f},asetpts=PTS-STARTPTS[k{i}]")
+        parts.append("".join(f"[k{i}]" for i in range(n)) + f"concat=n={n}:v=0:a=1[voice0]")
+    elif keeps:
+        a, b = keeps[0]
+        parts.append(f"[1:a]aresample=48000,atrim=start={a:.3f}:end={b:.3f},asetpts=PTS-STARTPTS[voice0]")
+    else:
+        parts.append("[1:a]aresample=48000[voice0]")
+    mix = ["[voice]"]
+    if has_music:
+        fade_out = max(0.0, duration - 1.0)
+        parts.append("[voice0]asplit=2[voice][sc]")
+        parts.append(f"[{music_input}:a]aresample=48000,volume={volume:.3f},afade=t=in:d=0.6,"
+                     f"afade=t=out:st={fade_out:.2f}:d=1[mus]")
+        # Music ducks automatically while someone talks.
+        parts.append("[mus][sc]sidechaincompress=threshold=0.02:ratio=10:attack=15:release=350[duck]")
+        mix.append("[duck]")
+    else:
+        parts.append("[voice0]anull[voice]")
+    for j, (idx, at, vol) in enumerate(sounds or []):
+        ms = int(max(0.0, at) * 1000)
+        parts.append(f"[{idx}:a]aresample=48000,volume={vol:.2f},adelay={ms}:all=1[fx{j}]")
+        mix.append(f"[fx{j}]")
+    if len(mix) > 1:
+        parts.append("".join(mix) + f"amix=inputs={len(mix)}:duration=first:normalize=0,{norm}[a]")
+    else:
+        parts.append(f"[voice]{norm}[a]")
+    return ";".join(parts)
+
+
+def _text_ass(texts, plan, out_size: tuple[int, int], path: Path) -> Path | None:
+    """Text overlays from the editor as positioned libass events."""
+    from app.media.subtitles import FONTS, _ass_color, _clean, _ts
+
+    ow, oh = out_size
+    scale = min(ow, oh) / 1080
+    styles, events = [], []
+    looks = {"title": ("montserrat-black", 1), "label": ("montserrat-extrabold", 3), "outline": ("bebas", 1)}
+    for i, t in enumerate(texts):
+        rng = plan.out_range(t.start, t.end)
+        if rng is None or not t.text.strip():
+            continue
+        font_key, border = looks.get(t.style, looks["title"])
+        size = int(max(20, min(220, t.size)) * scale)
+        if border == 3:   # opaque box behind the text
+            outline, back, width = _ass_color(t.box_color), _ass_color(t.box_color), 12 * scale
+        else:
+            outline, back, width = "&H00000000", "&H80000000", 6 * scale
+        styles.append(f"Style: T{i},{FONTS[font_key]},{size},{_ass_color(t.color)},{_ass_color(t.color)},{outline},"
+                      f"{back},0,0,0,0,100,100,0,0,{border},{width:.1f},{2 * scale:.1f},5,0,0,0,1")
+        x, y = int(min(1, max(0, t.x)) * ow), int(min(1, max(0, t.y)) * oh)
+        events.append(f"Dialogue: 1,{_ts(rng[0])},{_ts(rng[1])},T{i},,0,0,0,,{{\\pos({x},{y})}}{_clean(t.text, False)}")
+    if not events:
+        return None
+    path.write_text("\n".join([
+        "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {ow}", f"PlayResY: {oh}", "WrapStyle: 0",
+        "ScaledBorderAndShadow: yes", "", "[V4+ Styles]",
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, "
+        "Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, "
+        "MarginR, MarginV, Encoding", *styles, "", "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text", *events, ""]), encoding="utf-8")
+    return path
+
+
+class _Images:
+    """Editor image overlays (PNG with transparency), drawn on output frames."""
+
+    def __init__(self, items, out_size):
+        import cv2
+
+        self.items = []
+        ow, oh = out_size
+        for it in items:
+            img = cv2.imread(str(it.path), cv2.IMREAD_UNCHANGED)
+            if img is None:
+                continue
+            if img.ndim == 2:
+                img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGRA)
+            if img.shape[2] == 3:
+                img = np.dstack([img, np.full(img.shape[:2], 255, np.uint8)])
+            w = max(8, int(min(1.0, max(0.03, it.w)) * ow))
+            h = max(8, int(img.shape[0] * w / img.shape[1]))
+            img = cv2.resize(img, (w, h), interpolation=cv2.INTER_AREA)
+            x0, y0 = int(it.x * ow - w / 2), int(it.y * oh - h / 2)
+            self.items.append((it.start, it.end, img, x0, y0))
+
+    def draw(self, out: np.ndarray, t: float) -> None:
+        oh, ow = out.shape[:2]
+        for a, b, img, x0, y0 in self.items:
+            if not a <= t < b:
+                continue
+            h, w = img.shape[:2]
+            xa, ya, xb, yb = max(0, x0), max(0, y0), min(ow, x0 + w), min(oh, y0 + h)
+            if xb <= xa or yb <= ya:
+                continue
+            sub = img[ya - y0:yb - y0, xa - x0:xb - x0]
+            alpha = sub[:, :, 3:4].astype(np.float32) / 255
+            roi = out[ya:yb, xa:xb]
+            roi[:] = (roi * (1 - alpha) + sub[:, :, :3] * alpha).astype(np.uint8)
 
 
 def render_clip(src: Path, start: float, end: float, out_path: Path, settings: RenderSettings,
                 meta: dict, vision: dict | None, transcript: dict | None,
-                on_progress: Callable[[float], None] | None = None) -> str:
-    """Renders one clip; returns the layout actually used."""
+                on_progress: Callable[[float], None] | None = None, edit=None) -> str:
+    """Renders one clip; returns the layout actually used. With an EditPlan,
+    its trim replaces start/end and its cuts, texts, images, sounds and music apply."""
+    if edit is not None:
+        start, end = edit.start, edit.end
     dur = max(0.2, end - start)
+    out_dur = edit.total if edit is not None else dur
     fps = float(min(30.0, meta.get("fps") or 30.0))
     has_video = bool(meta.get("has_video"))
     W, H = meta.get("width") or 1280, meta.get("height") or 720
-    scale = min(1.0, 1920 / max(W, H))
+    scale = min(1.0, (1920 * max(0.25, settings.scale)) / max(W, H))
     W, H = int(W * scale) // 2 * 2, int(H * scale) // 2 * 2
 
     samples = faces_between(vision, start, end) if vision else []
@@ -410,7 +514,8 @@ def render_clip(src: Path, start: float, end: float, out_path: Path, settings: R
     comp = Composer(settings, W, H, fps, start, end, samples, who, has_video)
     ow, oh = comp.ow, comp.oh
 
-    ass_path = None
+    filters = []
+    temp_files = []
     if settings.subtitles and transcript:
         style = dict(settings.style or {})
         if comp.layout == "split":
@@ -420,20 +525,44 @@ def render_clip(src: Path, start: float, end: float, out_path: Path, settings: R
             style["position"] = "top"
             style["margin_top"] = comp.cam_h + int(oh * 0.025)
         ass_path = out_path.with_suffix(".ass")
-        build_ass(clip_words(transcript, start, end), style, (ow, oh), settings.format, ass_path)
+        cw = clip_words(transcript, start, end)
+        if edit is not None:   # the editor deleted words: retime what's left
+            cw = edit.remap_words([{**w, "start": w["start"] + start, "end": w["end"] + start} for w in cw])
+        build_ass(cw, style, (ow, oh), settings.format, ass_path)
+        filters.append(f"ass=filename={ass_path}:fontsdir={FONTS_DIR}")
+        temp_files.append(ass_path)
+    images = None
+    if edit is not None:
+        tp = _text_ass(edit.texts, edit, (ow, oh), out_path.with_suffix(".texts.ass"))
+        if tp:
+            filters.append(f"ass=filename={tp}:fontsdir={FONTS_DIR}")
+            temp_files.append(tp)
+        images = _Images(edit.images, (ow, oh)) if edit.images else None
 
     nv = video_encoder() == "h264_nvenc"
-    music = settings.music_path
-    vf = f"[0:v]{'ass=filename=' + str(ass_path) + ':fontsdir=' + str(FONTS_DIR) + ',' if ass_path else ''}format=yuv420p[v]"
+    music = edit.music_path if (edit is not None and edit.music_path) else settings.music_path
+    music_vol = edit.music_volume if (edit is not None and edit.music_path) else settings.music_volume
+    vf = "[0:v]" + ",".join(filters + ["format=yuv420p"]) + "[v]"
     cmd = ["ffmpeg", "-hide_banner", "-v", "error", "-y",
            "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{ow}x{oh}", "-r", f"{fps:g}", "-i", "pipe:0",
            "-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", str(src)]
+    next_input = 2
     if music:
         cmd += ["-stream_loop", "-1", "-i", str(music)]
-    cmd += ["-filter_complex", vf + ";" + _audio_filter(bool(music), settings.music_volume, dur),
-            "-map", "[v]", "-map", "[a]", *_encoder_args(video_encoder()),
-            "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-t", f"{dur:.3f}",
-            "-movflags", "+faststart", str(out_path)]
+        next_input += 1
+    sounds = []
+    for snd in (edit.sounds if edit is not None else []):
+        if edit.kept(snd.t):
+            cmd += ["-i", str(snd.path)]
+            sounds.append((next_input, edit.out_t(snd.t), snd.volume))
+            next_input += 1
+    keeps_rel = [(a - start, b - start) for a, b in edit.keeps] if edit is not None else None
+    enc_args = (["-c:v", "libx264", "-preset", "ultrafast", "-crf", "30"] if settings.scale < 1
+                else _encoder_args(video_encoder()))
+    cmd += ["-filter_complex", vf + ";" + _audio_filter(bool(music), music_vol, out_dur, keeps_rel, sounds),
+            "-map", "[v]", "-map", "[a]", *enc_args,
+            "-c:a", "aac", "-b:a", "128k" if settings.scale < 1 else "192k", "-ar", "48000",
+            "-t", f"{out_dur:.3f}", "-movflags", "+faststart", str(out_path)]
 
     with tempfile.TemporaryFile() as err:
         enc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=err)
@@ -447,7 +576,13 @@ def render_clip(src: Path, start: float, end: float, out_path: Path, settings: R
                 img = item[1] if item is not None else None
                 if has_video and img is None:
                     break     # source ended slightly early
-                enc.stdin.write(comp.frame(i, img).tobytes())
+                t = start + i / fps
+                if edit is not None and not edit.kept(t):
+                    continue  # cut in the editor
+                frame = comp.frame(i, img)
+                if images is not None:
+                    images.draw(frame, t)
+                enc.stdin.write(frame.tobytes())
                 written += 1
                 if on_progress and i % 15 == 0:
                     on_progress(i / total)
@@ -459,8 +594,8 @@ def render_clip(src: Path, start: float, end: float, out_path: Path, settings: R
             except BrokenPipeError:
                 pass
         rc = enc.wait()
-        if ass_path:
-            ass_path.unlink(missing_ok=True)
+        for f in temp_files:
+            f.unlink(missing_ok=True)
         if rc != 0 or written == 0:
             err.seek(0)
             msg = err.read().decode(errors="replace")[-1500:]

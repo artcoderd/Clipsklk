@@ -19,6 +19,9 @@ router = APIRouter(prefix="/library", tags=["library"])
 KINDS = {
     "logo": ({".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}, 5),
     "music": ({".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".wav": "audio/wav", ".ogg": "audio/ogg"}, 40),
+    # Editor: stickers/pictures over the video, and short sound effects.
+    "image": ({".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}, 10),
+    "sound": ({".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".wav": "audio/wav", ".ogg": "audio/ogg"}, 10),
 }
 MAX_ITEMS = 50
 

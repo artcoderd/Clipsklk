@@ -253,11 +253,12 @@ def _render_one(db, clip: Clip, asset: MediaAsset, src: Path, vision: dict | Non
     storage = get_storage()
     settings = resolve_settings(db, clip.user_id, clip.render, work)
     meta = {"width": asset.width, "height": asset.height, "fps": asset.fps, "has_video": asset.has_video}
+    edit = _edit_plan(db, clip, work) if clip.edit else None
     version = (clip.version or 0) + 1 if clip.storage_key else 1
     base = f"users/{clip.user_id}/clips/{clip.id}/v{version}"
     out, thumb = work / f"{clip.id}-v{version}.mp4", work / f"{clip.id}-v{version}.jpg"
-    layout = render_clip(src, clip.start, clip.end, out, settings, meta, vision, transcript, on_progress)
-    dur = clip.end - clip.start
+    layout = render_clip(src, clip.start, clip.end, out, settings, meta, vision, transcript, on_progress, edit=edit)
+    dur = edit.total if edit is not None else clip.end - clip.start
     at = clip.cover_t if clip.cover_t is not None and 0 <= clip.cover_t < dur else dur * 0.6
     ffmpeg.thumbnail(out, at, thumb)
     cover = work / f"{clip.id}-v{version}-cover.jpg"
@@ -279,6 +280,26 @@ def _render_one(db, clip: Clip, asset: MediaAsset, src: Path, vision: dict | Non
                 log.warning("could not delete %s", key)
 
 
+def _edit_plan(db, clip: Clip, work: Path):
+    """The saved EditDoc with the user's library files fetched locally."""
+    from app.media.edit import plan_from_doc
+
+    files: dict[str, Path] = {}
+    doc = clip.edit
+    ids = {i["library_id"] for i in doc.get("images", [])} | {s["library_id"] for s in doc.get("sounds", [])}
+    if doc.get("music"):
+        ids.add(doc["music"]["library_id"])
+    for item_id in ids:
+        item = db.get(LibraryItem, uuid.UUID(item_id))
+        if item is None or item.user_id != clip.user_id:
+            continue   # deleted from the library since: skipped
+        dest = work / f"lib-{item.id}{Path(item.storage_key).suffix}"
+        if not dest.exists():
+            get_storage().get_file(item.storage_key, dest)
+        files[item_id] = dest
+    return plan_from_doc(doc, files)
+
+
 def _cover_from_source(src: Path, clip: Clip, at: float, settings: RenderSettings, meta: dict,
                        vision: dict | None, work: Path, dest: Path) -> None:
     """The cover frame, framed like the clip but without subtitles (only the title goes on it)."""
@@ -286,6 +307,15 @@ def _cover_from_source(src: Path, clip: Clip, at: float, settings: RenderSetting
 
     frame = work / f"{clip.id}-coverframe.mp4"
     t = clip.start + at
+    if clip.edit:   # `at` is a position in the edited clip: find its source time
+        acc = 0.0
+        from app.media.edit import EditPlan
+        plan = EditPlan(clip.edit["trim"][0], clip.edit["trim"][1], [tuple(c) for c in clip.edit.get("cuts", [])])
+        for a, b in plan.keeps:
+            if acc + (b - a) >= at:
+                t = a + (at - acc)
+                break
+            acc += b - a
     plain = replace(settings, subtitles=False, music_path=None)
     try:
         render_clip(src, t, t + 0.2, frame, plain, meta, vision, None)
@@ -646,3 +676,45 @@ def live_ai_review(self, session_id: str, asset_id: str, offset: float) -> None:
         db.close()
     for clip in made:
         make_live_clip.run(str(clip.id))
+
+
+@celery_app.task(name="app.worker.tasks.prepare_proxy", bind=True)
+def prepare_proxy(self, clip_id: str) -> None:
+    """Editor preview: the clip's stretch (+ margin) framed like the clip, half
+    size, no subtitles/music/logo (the browser draws those live)."""
+    from dataclasses import replace
+
+    db = SessionLocal()
+    work = Path(get_settings().work_dir) / f"proxy-{clip_id}"
+    clip = None
+    try:
+        clip = db.get(Clip, uuid.UUID(clip_id))
+        if clip is None or clip.proxy_status != "preparing":
+            return
+        job = db.get(Job, clip.job_id)
+        asset = db.get(MediaAsset, clip.asset_id or job.asset_id)
+        work.mkdir(parents=True, exist_ok=True)
+        src = _source_file(asset, work)
+        settings = replace(resolve_settings(db, clip.user_id, clip.render, work), subtitles=False, music_path=None,
+                           logo_path=None, scale=0.5)
+        meta = {"width": asset.width, "height": asset.height, "fps": asset.fps, "has_video": asset.has_video}
+        out = work / "proxy.mp4"
+        render_clip(src, clip.proxy_start, clip.proxy_end, out, settings, meta,
+                    _load_json(asset.vision_key, work), None)
+        key = f"users/{clip.user_id}/clips/{clip.id}/proxy-{clip.proxy_sig}.mp4"
+        get_storage().put_file(key, out, "video/mp4")
+        old, clip.proxy_key, clip.proxy_status = clip.proxy_key, key, "ready"
+        db.commit()
+        if old and old != key:
+            get_storage().delete_prefix(old)
+    except Exception:
+        log.exception("proxy for clip %s failed", clip_id)
+        if clip is not None:
+            db.rollback()
+            clip.proxy_status = "failed"
+            db.commit()
+    finally:
+        if clip is not None:
+            events.publish(clip.job_id, "clip", ClipOut.model_validate(clip).model_dump(mode="json"))
+        shutil.rmtree(work, ignore_errors=True)
+        db.close()

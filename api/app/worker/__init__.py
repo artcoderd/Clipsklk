@@ -31,3 +31,7 @@ def enqueue_live_review(session_id, asset_id, offset: float) -> None:
 
 def enqueue_cover(clip_id) -> None:
     _send("app.worker.tasks.refresh_cover", clip_id)
+
+
+def enqueue_proxy(clip_id) -> None:
+    _send("app.worker.tasks.prepare_proxy", clip_id)

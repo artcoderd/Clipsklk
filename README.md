@@ -5,7 +5,7 @@ TikTok, Facebook) o subes un archivo, y recibes clips verticales con subtítulos
 Funciona desde el navegador en iPhone, Android, Windows y Mac, y se puede instalar
 en la pantalla de inicio (PWA).
 
-## Estado: Fases 1 a 5 ✅ (base, video grabado, encuadre vertical y subtítulos, directos en vivo, IA)
+## Estado: Fases 1 a 6 ✅ (base, video grabado, encuadre vertical y subtítulos, directos en vivo, IA, editor web)
 
 | Pieza | Qué hay |
 |---|---|
@@ -143,6 +143,27 @@ transcripción con tiempos (+ "(risas)", "(gritos)" del análisis) ─► Claude
 Se probó con los tres SDK oficiales contra respuestas simuladas a nivel HTTP (sin claves reales
 en este entorno), y de punta a punta en Docker con un servidor que imita la API de Claude.
 
+### Fase 6: editor web
+
+```
+el servidor prepara una copia ligera del tramo (ya encuadrada, sin subtítulos, ±20 s de margen)
+   └► el navegador la reproduce y dibuja encima subtítulos, textos e imágenes en vivo
+guardar = documento de edición (tiempos del video original) ─► render final en el servidor
+```
+
+- **Funciona con el dedo y con el mouse** (eventos de puntero; probado con toques reales y con mouse).
+- **Línea de tiempo** con forma de onda, tiradores para **recortar** inicio y fin, **cortes**
+  (botón "Seleccionar tramo" para no chocar con el desplazamiento en el teléfono), **marcadores**,
+  barras de textos/imágenes que se arrastran y se estiran, y zoom.
+- **Editar borrando texto**: toca una palabra, toca otra para extender, "Borrar". Lo tachado no sale
+  en el video (ni en los subtítulos). Botón **"Quitar silencios"**.
+- **Textos** (título, etiqueta con fondo, Bebas) que se arrastran sobre la vista previa;
+  **imágenes y stickers**, **efectos de sonido** y **música** de la biblioteca. La música baja sola
+  cuando alguien habla en el render final.
+- **Deshacer/rehacer**, **guardado automático** y "Deshacer todo" (vuelve al clip original).
+- El **render final** lo hace el servidor con todo aplicado; los textos e imágenes quedan pegados al
+  contenido: si después borras una frase, lo demás no se mueve de sitio.
+
 ## Arrancar en local
 
 Requisitos: Docker con Compose.
@@ -233,6 +254,6 @@ pon `SITE_ADDRESS=clipeo.app` en `.env` y Caddy saca el certificado HTTPS solo
 3. ~~Encuadre vertical y subtítulos~~ ✅
 4. ~~Directos en vivo~~ ✅
 5. ~~Selección con IA~~ ✅
-6. Editor web táctil.
+6. ~~Editor web~~ ✅
 7. Publicar: descarga, compartir nativo, Meta, TikTok y Telegram.
 8. Pagos con Stripe, límites por plan, correo, backups y despliegue con dominio.

@@ -8,7 +8,7 @@ import { ApiError, errorMessage, type LibraryItem } from "@/lib/api";
 import { useLibrary } from "@/lib/useLibrary";
 import { useMe } from "@/lib/useMe";
 
-function upload(kind: "logo" | "music", file: File): Promise<LibraryItem> {
+function upload(kind: LibraryItem["kind"], file: File): Promise<LibraryItem> {
   const form = new FormData();
   form.append("kind", kind);
   form.append("file", file);
@@ -20,7 +20,7 @@ function upload(kind: "logo" | "music", file: File): Promise<LibraryItem> {
 }
 
 function Section({ kind, title, hint, accept, items, reload }: {
-  kind: "logo" | "music"; title: string; hint: string; accept: string; items: LibraryItem[]; reload: () => void;
+  kind: LibraryItem["kind"]; title: string; hint: string; accept: string; items: LibraryItem[]; reload: () => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -60,7 +60,7 @@ function Section({ kind, title, hint, accept, items, reload }: {
         <ul className="space-y-3">
           {items.map((i) => (
             <li key={i.id} className="flex items-center gap-3 rounded-2xl bg-black/20 p-3">
-              {kind === "logo" ? (
+              {kind === "logo" || kind === "image" ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={`/api/library/${i.id}/file`} alt="" className="h-12 w-20 rounded-lg bg-white/10 object-contain p-1" />
               ) : (
@@ -83,7 +83,7 @@ function Section({ kind, title, hint, accept, items, reload }: {
 
 export default function LibraryPage() {
   const { user, loading } = useMe();
-  const { logos, music, reload } = useLibrary(!!user);
+  const { logos, music, images, sounds, reload } = useLibrary(!!user);
   if (loading || !user) return <Loading />;
   return (
     <Shell user={user}>
@@ -92,6 +92,10 @@ export default function LibraryPage() {
                items={logos} reload={reload} />
       <Section kind="music" title="Música" hint="MP3, M4A, WAV u OGG, hasta 40 MB. Usa solo música con derechos para publicar."
                accept="audio/*" items={music} reload={reload} />
+      <Section kind="image" title="Imágenes y stickers" hint="Para ponerlas encima del video en el editor. PNG transparente, hasta 10 MB."
+               accept="image/png,image/jpeg,image/webp" items={images} reload={reload} />
+      <Section kind="sound" title="Efectos de sonido" hint="Sonidos cortos para el editor, hasta 10 MB."
+               accept="audio/*" items={sounds} reload={reload} />
     </Shell>
   );
 }

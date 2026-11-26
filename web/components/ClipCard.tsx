@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 import { fmtTime, LAYOUT_LABELS, REASON_LABELS, type Clip } from "@/lib/api";
@@ -76,6 +77,12 @@ export function ClipCard({ clip, title, onEdit, onChange, aiAvailable = false }:
           <p className="text-xs text-white/40">
             {clip.render?.format} · {LAYOUT_LABELS[clip.layout as keyof typeof LAYOUT_LABELS] ?? clip.layout}
           </p>
+        )}
+        {clip.render_status !== "rendering" && clip.version > 0 && (
+          <Link href={`/clips/${clip.id}/editar`}
+                className="flex min-h-11 items-center justify-center rounded-2xl border border-fuchsia-400/40 bg-fuchsia-500/10 text-sm font-semibold">
+            ✂️ Abrir en el editor{clip.edited ? " (editado)" : ""}
+          </Link>
         )}
         <div className="flex gap-2">
           {onEdit && (

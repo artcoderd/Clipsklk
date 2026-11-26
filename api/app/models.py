@@ -159,9 +159,20 @@ class Clip(Base):
     cover_t: Mapped[float | None] = mapped_column(Float, nullable=True)   # seconds from the clip start
     cover_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     ai_provider: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Web editor: the saved edit (schemas.EditDoc) and the light preview copy it plays.
+    edit: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    proxy_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    proxy_start: Mapped[float | None] = mapped_column(Float, nullable=True)   # source seconds it covers
+    proxy_end: Mapped[float | None] = mapped_column(Float, nullable=True)
+    proxy_sig: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    proxy_status: Mapped[str] = mapped_column(String(16), default="none")       # none | preparing | ready | failed
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     job: Mapped[Job] = relationship(back_populates="clips")
+
+    @property
+    def edited(self) -> bool:
+        return bool(self.edit)
 
     @property
     def cover_rev(self) -> str | None:
@@ -185,7 +196,7 @@ class LibraryItem(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
-    kind: Mapped[str] = mapped_column(String(16))   # logo | music
+    kind: Mapped[str] = mapped_column(String(16))   # logo | music | image | sound
     name: Mapped[str] = mapped_column(String(120))
     storage_key: Mapped[str] = mapped_column(String(512))
     content_type: Mapped[str] = mapped_column(String(64))

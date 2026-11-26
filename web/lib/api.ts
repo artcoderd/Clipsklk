@@ -108,7 +108,7 @@ export function aiStatusText(status: string | null, labels: Record<string, strin
 }
 
 export type Style = { id: string; name: string; preset: boolean; config: StyleConfig };
-export type LibraryItem = { id: string; kind: "logo" | "music"; name: string; size: number; created_at: string };
+export type LibraryItem = { id: string; kind: "logo" | "music" | "image" | "sound"; name: string; size: number; created_at: string };
 export type Person = { id: number; seconds: number };
 
 export const FORMAT_LABELS: Record<Format, string> = {
@@ -152,6 +152,8 @@ export type Clip = {
   hashtags: string[];
   ai_provider: string | null;
   cover_rev: string | null;
+  proxy_status: string;
+  edited: boolean;
   created_at: string;
 };
 
@@ -226,6 +228,8 @@ const MESSAGES: Record<string, string> = {
   too_many_lives: "Ya estás grabando un directo. Termínalo antes de empezar otro.",
   live_not_active: "Este directo ya terminó.",
   ai_not_configured: "La IA no está configurada en el servidor.",
+  edit_too_short: "El clip editado tiene que durar al menos 1 segundo.",
+  invalid_library_item: "Uno de los archivos ya no está en tu biblioteca.",
   no_text: "Este clip no tiene texto hablado.",
   ai_unavailable: "La IA no respondió. Inténtalo de nuevo.",
   ai_rate_limited: "La IA está saturada. Prueba en un momento.",
