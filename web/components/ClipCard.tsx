@@ -57,7 +57,7 @@ export function ClipCard({ clip, title, onEdit }: { clip: Clip; title: string; o
             </span>
           ))}
           <span className="ml-auto text-xs text-white/50">
-            {fmtTime(clip.start)}–{fmtTime(clip.end)} · {Math.round(clip.duration)}s
+            {fmtTime(clip.offset + clip.start)}–{fmtTime(clip.offset + clip.end)} · {Math.round(clip.duration)}s
           </span>
         </div>
         {clip.text && <p className="line-clamp-3 text-sm text-white/70">“{clip.text}”</p>}

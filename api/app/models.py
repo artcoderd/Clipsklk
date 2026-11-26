@@ -29,6 +29,7 @@ class JobStatus(str, enum.Enum):
 class JobSource(str, enum.Enum):
     url = "url"
     upload = "upload"
+    live = "live"     # clips made during a live stream / its final recording
 
 
 class User(Base):
@@ -142,6 +143,10 @@ class Clip(Base):
     layout: Mapped[str | None] = mapped_column(String(16), nullable=True)   # the one actually used
     render_status: Mapped[str] = mapped_column(String(16), default="ready")  # ready | rendering | failed
     version: Mapped[int] = mapped_column(Integer, default=1)
+    # Live clips have their own short source (the stretch of the stream around them)...
+    asset_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("media_assets.id"), nullable=True)
+    # ...and `offset` is where that source starts inside the whole broadcast.
+    offset: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     job: Mapped[Job] = relationship(back_populates="clips")
@@ -180,3 +185,40 @@ class ActivityLog(Base):
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
     ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class LiveSession(Base):
+    __tablename__ = "live_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    url: Mapped[str] = mapped_column(Text)
+    platform: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # starting | waiting | recording | reconnecting | finishing | ended | failed
+    status: Mapped[str] = mapped_column(String(16), default="starting")
+    chat_status: Mapped[str] = mapped_column(String(16), default="none")   # none | connected | reconnecting
+    auto_clips: Mapped[bool] = mapped_column(default=True)
+    sensitivity: Mapped[str] = mapped_column(String(8), default="normal")   # low | normal | high
+    clip_duration: Mapped[int] = mapped_column(Integer, default=45)          # automatic clips
+    final_clips: Mapped[int] = mapped_column(Integer, default=5)            # best clips at the end
+    render: Mapped[dict] = mapped_column(JSON, default=dict)
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id"))        # holds the live clips
+    final_job_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("jobs.id"), nullable=True)
+    recorded_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    end_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PushSubscription(Base):
+    """A browser/phone that accepted notifications (Web Push)."""
+    __tablename__ = "push_subscriptions"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    endpoint: Mapped[str] = mapped_column(Text, unique=True)
+    p256dh: Mapped[str] = mapped_column(String(255))
+    auth: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

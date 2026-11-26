@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir -r requirements-worker.txt
 
 COPY . .
 RUN useradd --create-home --uid 1000 clipeo \
-    && mkdir -p /data/storage /data/work /data/models && chown -R clipeo /data
+    && mkdir -p /data/storage /data/work /data/models /data/live && chown -R clipeo /data
 USER clipeo
 
 CMD ["celery", "-A", "app.worker.celery_app", "worker", "-Q", "video", "--loglevel=info", "--concurrency=1"]

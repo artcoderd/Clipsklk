@@ -117,7 +117,46 @@ export type Clip = {
   layout: string | null;
   render_status: "ready" | "rendering" | "failed";
   version: number;
+  offset: number;
   created_at: string;
+};
+
+export type LiveStatus = "starting" | "waiting" | "recording" | "reconnecting" | "finishing" | "ended" | "failed";
+
+export type Live = {
+  id: string;
+  url: string;
+  platform: string | null;
+  status: LiveStatus;
+  chat_status: "none" | "connected" | "reconnecting";
+  auto_clips: boolean;
+  sensitivity: "low" | "normal" | "high";
+  clip_duration: number;
+  final_clips: number;
+  job_id: string;
+  final_job_id: string | null;
+  recorded_seconds: number;
+  end_reason: string | null;
+  error: string | null;
+  started_at: string;
+  ended_at: string | null;
+};
+
+export type LiveActivity = { recorded: number; interest: number[]; chat: number[]; chat_messages?: number };
+
+export type LiveEvent =
+  | { type: "live"; live: Live }
+  | { type: "activity"; activity: LiveActivity }
+  | { type: "clip"; clip: Clip };
+
+export const LIVE_STATUS: Record<LiveStatus, string> = {
+  starting: "Conectando…",
+  waiting: "Esperando a que empiece el directo",
+  recording: "Grabando",
+  reconnecting: "Se cayó el directo, reconectando…",
+  finishing: "Terminando y preparando lo mejor…",
+  ended: "Directo terminado",
+  failed: "Se perdió la conexión con el directo",
 };
 
 export type JobEvent = { type: "job"; job: Job } | { type: "clip"; clip: Clip };
@@ -148,6 +187,9 @@ const MESSAGES: Record<string, string> = {
   forbidden: "No tienes permiso.",
   not_authenticated: "Inicia sesión para continuar.",
   job_busy: "Este proyecto todavía se está procesando.",
+  unsupported_live_url: "Pega el link de un directo de YouTube, Twitch, Kick o TikTok.",
+  too_many_lives: "Ya estás grabando un directo. Termínalo antes de empezar otro.",
+  live_not_active: "Este directo ya terminó.",
   clip_busy: "Este clip ya se está renderizando.",
   person_not_found: "No encontramos a esa persona en el video.",
   invalid_style: "Ese estilo de subtítulos no existe.",
@@ -252,6 +294,8 @@ export const REASON_LABELS: Record<string, string> = {
   "conversación": "💬 Conversación",
   "video completo": "🎬 Completo",
   persona: "👤 Persona elegida",
+  chat: "💬 Chat",
+  "clip ahora": "⚡ ¡Clip ahora!",
 };
 
 export function fmtTime(s: number): string {
@@ -267,4 +311,5 @@ export const PLATFORM_LABELS: Record<string, string> = {
   kick: "Kick",
   tiktok: "TikTok",
   facebook: "Facebook",
+  hls: "Señal HLS",
 };

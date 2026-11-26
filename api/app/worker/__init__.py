@@ -14,3 +14,11 @@ def enqueue_job(job_id: uuid.UUID) -> None:
 
 def enqueue_rerender(clip_id: uuid.UUID) -> None:
     _send("app.worker.tasks.rerender_clip", clip_id)
+
+
+def enqueue_live(session_id: uuid.UUID) -> None:
+    _send("app.worker.tasks.run_live", session_id)
+
+
+def enqueue_live_clip(clip_id: uuid.UUID) -> None:
+    _send("app.worker.tasks.make_live_clip", clip_id)

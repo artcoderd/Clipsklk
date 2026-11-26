@@ -178,6 +178,7 @@ class ClipOut(BaseModel):
     layout: str | None
     render_status: str
     version: int
+    offset: float
     created_at: datetime
 
     @computed_field
@@ -209,3 +210,46 @@ class JobOut(BaseModel):
     error: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class LiveIn(BaseModel):
+    url: str = Field(max_length=2048)
+    auto_clips: bool = True
+    sensitivity: Literal["low", "normal", "high"] = "normal"
+    clip_duration: int = Field(default=45, ge=15, le=180)
+    final_clips: int = Field(default=5, ge=0, le=30)
+    render: RenderOptions = RenderOptions()
+
+
+class LiveUpdateIn(BaseModel):
+    auto_clips: bool | None = None
+    sensitivity: Literal["low", "normal", "high"] | None = None
+
+
+class ClipNowIn(BaseModel):
+    seconds: int = Field(default=60, ge=10, le=180)
+
+
+class LiveOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    url: str
+    platform: str | None
+    status: str
+    chat_status: str
+    auto_clips: bool
+    sensitivity: str
+    clip_duration: int
+    final_clips: int
+    job_id: uuid.UUID
+    final_job_id: uuid.UUID | None
+    recorded_seconds: float
+    end_reason: str | None
+    error: str | None
+    started_at: datetime
+    ended_at: datetime | None
+
+
+class PushSubscriptionIn(BaseModel):
+    endpoint: str = Field(max_length=2048)
+    keys: dict[str, str]

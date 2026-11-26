@@ -107,7 +107,7 @@ def _get_asset(db, job: Job) -> MediaAsset:
     asset = db.scalar(select(MediaAsset).where(MediaAsset.user_id == job.user_id, MediaAsset.source_key == key))
     if asset is None:
         asset = MediaAsset(user_id=job.user_id, source_key=key)
-        if job.source == JobSource.upload:
+        if job.source != JobSource.url:   # uploads and live recordings are already stored
             asset.storage_key = job.storage_key
             asset.title = job.original_filename
         db.add(asset)
@@ -338,6 +338,8 @@ def process_job(self, job_id: str) -> None:
             job.title = asset.title
         _make_clips(db, job, asset, prog, work)
         prog.push(status=JobStatus.done, stage="done", progress=100, focus_person=None)
+        _notify(db, job.user_id, "Tus clips están listos ✨", job.title or "Proyecto terminado", f"/jobs/{job.id}",
+                f"job-{job.id}")
     except PipelineError as e:
         log.warning("job %s failed: %s", job_id, e)
         _fail(db, job, e.code)
@@ -372,7 +374,7 @@ def rerender_clip(self, clip_id: str) -> None:
         if clip is None or clip.render_status != "rendering":
             return
         job = db.get(Job, clip.job_id)
-        asset = db.get(MediaAsset, job.asset_id)
+        asset = db.get(MediaAsset, clip.asset_id or job.asset_id)
         work.mkdir(parents=True, exist_ok=True)
         src = _source_file(asset, work)
         _render_one(db, clip, asset, src, _load_json(asset.vision_key, work),
@@ -386,5 +388,106 @@ def rerender_clip(self, clip_id: str) -> None:
     finally:
         if clip is not None:
             events.publish(clip.job_id, "clip", ClipOut.model_validate(clip).model_dump(mode="json"))
+        shutil.rmtree(work, ignore_errors=True)
+        db.close()
+
+
+def _notify(db, user_id, title: str, body: str, url: str, tag: str) -> None:
+    try:
+        from app.push import send_to_user
+        send_to_user(db, user_id, title, body, url, tag)
+    except Exception:
+        log.warning("push notification failed", exc_info=True)
+
+
+# --- Live -------------------------------------------------------------------
+
+@celery_app.task(name="app.worker.tasks.run_live", bind=True, acks_late=False,
+                 time_limit=int(get_settings().live_max_hours * 3600 + 3600))
+def run_live(self, session_id: str) -> None:
+    """Records and watches one live stream until it ends (runs for hours).
+    acks_late=False: a long recording must never be re-delivered to a second worker."""
+    from app.live.controller import LiveController
+    from app.models import LiveSession
+
+    try:
+        LiveController(session_id).run()
+    except Exception:
+        log.exception("live %s crashed", session_id)
+        db = SessionLocal()
+        try:
+            live = db.get(LiveSession, uuid.UUID(session_id))
+            if live is not None:
+                live.status, live.error = "failed", "live_crashed"
+                db.commit()
+        finally:
+            db.close()
+
+
+def _snap(t: float, edges: list[float], limit: float) -> float:
+    near = [e for e in edges if abs(e - t) <= limit]
+    return min(near, key=lambda e: abs(e - t)) if near else t
+
+
+@celery_app.task(name="app.worker.tasks.make_live_clip", bind=True)
+def make_live_clip(self, clip_id: str) -> None:
+    """Renders a clip cut from a live stream: transcribe + faces on its own
+    short source, tidy the edges to sentence boundaries, render, notify."""
+    from app.live.controller import publish as live_publish
+    from app.models import LiveSession
+
+    db = SessionLocal()
+    work = Path(get_settings().work_dir) / f"live-{clip_id}"
+    clip = None
+    try:
+        clip = db.get(Clip, uuid.UUID(clip_id))
+        if clip is None or clip.render_status != "rendering":
+            return
+        asset = db.get(MediaAsset, clip.asset_id)
+        work.mkdir(parents=True, exist_ok=True)
+        src = _source_file(asset, work)
+        meta = ffmpeg.probe(src)
+        asset.duration, asset.width, asset.height, asset.has_video, asset.fps = (
+            meta["duration"], meta["width"], meta["height"], meta["has_video"], meta["fps"])
+        wav = work / "audio.wav"
+        ffmpeg.extract_audio(src, wav, meta["duration"])
+        transcript = transcribe(wav, meta["duration"])
+        base = f"users/{clip.user_id}/assets/{asset.id}"
+        _save_json(f"{base}/transcript.json.gz", transcript)
+        asset.transcript_key = f"{base}/transcript.json.gz"
+        vision = None
+        if meta["has_video"]:
+            vision = analyze_video(src, meta["width"], meta["height"], meta["duration"],
+                                   hwaccel=ffmpeg.video_encoder() == "h264_nvenc")
+            _save_json(f"{base}/vision.json.gz", vision)
+            asset.vision_key = f"{base}/vision.json.gz"
+        # Start and end on sentence boundaries when one is close.
+        starts = [sg["start"] for sg in transcript["segments"]]
+        ends = [sg["end"] for sg in transcript["segments"]]
+        a = _snap(clip.start, starts, 3.0)
+        b = _snap(clip.end, ends, 3.0) if "clip ahora" not in clip.reasons else clip.end
+        if b - a >= 3:
+            clip.start, clip.end = round(max(0.0, a), 2), round(min(meta["duration"], b), 2)
+        clip.text = " ".join(w["word"].strip() for sg in transcript["segments"] for w in (sg.get("words") or [])
+                             if clip.start <= w["start"] < clip.end)[:5000]
+        db.commit()
+        _render_one(db, clip, asset, src, vision, transcript, work)
+        live = db.query(LiveSession).filter(LiveSession.job_id == clip.job_id).first()
+        url = f"/live/{live.id}" if live else f"/jobs/{clip.job_id}"
+        _notify(db, clip.user_id, "¡Nuevo clip del directo! 🎬",
+                ", ".join(clip.reasons) if clip.reasons else "Listo para publicar", url, f"clip-{clip.id}")
+    except Exception:
+        log.exception("live clip %s failed", clip_id)
+        if clip is not None:
+            db.rollback()
+            clip.render_status = "failed"
+            db.commit()
+    finally:
+        if clip is not None:
+            payload = ClipOut.model_validate(clip).model_dump(mode="json")
+            events.publish(clip.job_id, "clip", payload)
+            live = db.query(LiveSession).filter(LiveSession.job_id == clip.job_id).first()
+            if live:
+                live_publish(live.id, "clip", payload)
         shutil.rmtree(work, ignore_errors=True)
         db.close()

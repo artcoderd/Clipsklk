@@ -48,6 +48,23 @@ class Settings(BaseSettings):
     video_encoder: str = "auto"          # auto = h264_nvenc when it works, else libx264
     ytdlp_cookies_file: str | None = None
 
+    # Live mode
+    live_dir: str = "/data/live"         # segments, shared by live and video workers
+    live_max_hours: float = 12.0
+    live_offline_grace_minutes: float = 10.0   # give up after this long without video
+    live_max_auto_clips_per_hour: int = 12
+    max_lives_per_user: int = 1
+    # Also accept plain .m3u8 links (your own encoder/CDN). Off by default.
+    live_allow_generic_hls: bool = False
+    twitch_irc_host: str = "irc.chat.twitch.tv"
+    twitch_irc_port: int = 6697
+    twitch_irc_tls: bool = True
+
+    # Web push (generate with: python -m app.cli vapid-keys)
+    vapid_public_key: str | None = None
+    vapid_private_key: str | None = None
+    vapid_subject: str = "mailto:admin@example.com"
+
     @property
     def is_production(self) -> bool:
         return self.environment == "production"

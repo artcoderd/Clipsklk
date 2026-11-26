@@ -38,6 +38,7 @@ services:
       redis: { condition: service_healthy }
 
   worker:
+    image: clipsklk-worker
     build:
       context: ./api
       dockerfile: Dockerfile.worker
@@ -53,6 +54,24 @@ services:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
     # On the GPU server: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+
+  # Records live streams (streamlink + ffmpeg stream copy) and detects moments.
+  # Light on CPU, no GPU needed; each stream it records is one slot.
+  live-worker:
+    image: clipsklk-worker          # same image as `worker` (built there)
+    pull_policy: never
+    restart: unless-stopped
+    command: celery -A app.worker.celery_app worker -Q live --loglevel=info --concurrency=4 --prefetch-multiplier=1 -n live@%h
+    env_file: .env
+    environment: *backend-env
+    volumes:
+      - storage:/data/storage
+      - live:/data/live
+      - models:/data/models
+    depends_on:
+      worker: { condition: service_started }
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
 
   web:
     build: ./web
@@ -72,6 +91,7 @@ services:
     depends_on: [web, api]
 
 volumes:
+  live:
   work:
   models:
   pgdata:

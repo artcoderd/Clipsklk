@@ -19,7 +19,7 @@ COPY . .
 # Same UID as the API image: both write to the shared storage volume.
 # (Ubuntu 24.04 ships a default "ubuntu" user with UID 1000; remove it first.)
 RUN userdel -r ubuntu 2>/dev/null; useradd --create-home --uid 1000 clipeo \
-    && mkdir -p /data/storage /data/work /data/models && chown -R clipeo /data
+    && mkdir -p /data/storage /data/work /data/models /data/live && chown -R clipeo /data
 USER clipeo
 
 CMD ["celery", "-A", "app.worker.celery_app", "worker", "-Q", "video", "--loglevel=info", "--concurrency=1"]

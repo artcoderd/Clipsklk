@@ -72,7 +72,8 @@ def rerender(clip_id: uuid.UUID, opts: RenderOptions, request: Request, user: Us
     if clip.render_status == "rendering":
         raise HTTPException(status.HTTP_409_CONFLICT, "clip_busy")
     job = db.get(Job, clip.job_id)
-    asset = db.get(MediaAsset, job.asset_id) if job and job.asset_id else None
+    asset_id = clip.asset_id or (job.asset_id if job else None)
+    asset = db.get(MediaAsset, asset_id) if asset_id else None
     if asset is None or not asset.storage_key:
         raise HTTPException(status.HTTP_409_CONFLICT, "job_not_ready")
     clip.render = validate_render(db, user.id, opts)

@@ -5,6 +5,28 @@ _tmp = tempfile.mkdtemp()
 os.environ["DATABASE_URL"] = f"sqlite:///{_tmp}/test.db"
 os.environ["STORAGE_DIR"] = f"{_tmp}/storage"
 os.environ["WORK_DIR"] = f"{_tmp}/work"
+os.environ["LIVE_DIR"] = f"{_tmp}/live"
+os.environ["LIVE_ALLOW_GENERIC_HLS"] = "true"
+os.environ["LIVE_OFFLINE_GRACE_MINUTES"] = "0.4"
+# CLIs installed next to this interpreter (streamlink, yt-dlp) must be on PATH.
+import sys  # noqa: E402
+os.environ["PATH"] = os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", "")
+
+
+def _vapid():
+    import base64
+
+    from cryptography.hazmat.primitives import serialization
+    from py_vapid import Vapid
+    v = Vapid()
+    v.generate_keys()
+    pub = v.public_key.public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+    priv = v.private_key.private_numbers().private_value.to_bytes(32, "big")
+    b64 = lambda b: base64.urlsafe_b64encode(b).decode().rstrip("=")  # noqa: E731
+    return b64(pub), b64(priv)
+
+
+os.environ["VAPID_PUBLIC_KEY"], os.environ["VAPID_PRIVATE_KEY"] = _vapid()
 os.environ["PUBLIC_SIGNUP"] = "false"
 os.environ["SECRET_KEY"] = "test-secret-key-that-is-at-least-32-bytes"
 
@@ -27,10 +49,12 @@ def _env(monkeypatch):
     Base.metadata.create_all(engine)
     fake = fakeredis.FakeRedis(decode_responses=True)
     monkeypatch.setattr(redis_client, "get_redis", lambda: fake)
-    for mod in ("app.ratelimit", "app.events", "app.routers.jobs", "app.worker.tasks"):
+    for mod in ("app.ratelimit", "app.events", "app.routers.jobs", "app.worker.tasks", "app.routers.lives",
+                "app.live.controller"):
         monkeypatch.setattr(f"{mod}.get_redis", lambda: fake)
     queued = []
     monkeypatch.setattr("app.routers.jobs.enqueue_job", lambda job_id: queued.append(job_id))
+    monkeypatch.setattr("app.routers.lives.enqueue_live", lambda live_id: queued.append(("live", live_id)))
     yield queued
 
 

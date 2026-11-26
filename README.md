@@ -5,7 +5,7 @@ TikTok, Facebook) o subes un archivo, y recibes clips verticales con subtítulos
 Funciona desde el navegador en iPhone, Android, Windows y Mac, y se puede instalar
 en la pantalla de inicio (PWA).
 
-## Estado: Fase 1 ✅ · Fase 2 (video grabado) ✅ · Fase 3 (encuadre vertical y subtítulos) ✅
+## Estado: Fases 1 a 4 ✅ (base, video grabado, encuadre vertical y subtítulos, directos en vivo)
 
 | Pieza | Qué hay |
 |---|---|
@@ -80,6 +80,40 @@ render: ffmpeg decodifica ─► Python compone cada fotograma ─► ffmpeg + l
 
 Se probó con videos sintéticos de 2 y 3 personas y con cortes de cámara: personas agrupadas
 correctamente y el hablante acertado en el 100 % de los momentos (sin contar 1,5 s tras cada cambio).
+
+### Fase 4: directos en vivo
+
+```
+streamlink (YouTube, Twitch, Kick, TikTok) ─► ffmpeg en trozos de 10 s sin recodificar
+   ├► audio de cada trozo ─► risas, gritos, volumen (comparado con los 5 min anteriores)
+   ├► chat ─► mensajes por segundo y reacciones ("jajaja", KEKW, 😂…) vs. lo normal del canal
+   └► pico ─► clip automático ─► el worker de GPU transcribe, encuadra y renderiza ─► notificación
+al terminar: la grabación completa pasa por el proceso normal ─► "lo mejor del directo"
+```
+
+- **Pegas el link de un directo** (o de un canal antes de que empiece: espera hasta que arranque).
+- **¡Clip ahora!**: guarda los últimos 30, 60 o 90 segundos desde el toque.
+- **Clips automáticos** cuando hay risas, gritos, volumen alto o el chat explota, con sensibilidad
+  baja/normal/alta, un mínimo de tiempo entre clips y un máximo por hora.
+- **Reconexión automática** del video y del chat; si el directo se cae más de
+  `LIVE_OFFLINE_GRACE_MINUTES` se da por terminado.
+- **Al terminar**, la grabación completa se procesa como un video normal y salen los mejores clips.
+- **Notificaciones push** en el teléfono con cada clip nuevo (y cuando termina un proyecto).
+  En iPhone funcionan si Clipeo está añadido a la pantalla de inicio (iOS 16.4+).
+- El chat se lee en **Twitch** (IRC anónimo), **YouTube** y **Kick**. En **TikTok** el chat
+  necesita un servicio de firmas de terceros, así que ahí se detecta solo por el audio.
+- El servicio `live-worker` graba (poco CPU, sin GPU, hasta 4 directos a la vez por defecto);
+  el `worker` con GPU solo transcribe y renderiza los clips.
+
+Probado con un directo simulado (HLS en tiempo real, como sirven las plataformas) y un chat de
+Twitch simulado: grabación, caída y reconexión, fin del directo, clip automático por chat y por
+audio, "¡Clip ahora!" y la selección final. Falta probarlo contra las plataformas reales.
+
+Para activar las notificaciones, genera las claves una vez y ponlas en `.env`:
+
+```bash
+docker compose run --rm api python -m app.cli vapid-keys
+```
 
 ## Arrancar en local
 
@@ -169,7 +203,7 @@ pon `SITE_ADDRESS=clipeo.app` en `.env` y Caddy saca el certificado HTTPS solo
 
 2. ~~Video grabado~~ ✅
 3. ~~Encuadre vertical y subtítulos~~ ✅
-4. Directos en vivo con streamlink, chat, "¡Clip ahora!", notificaciones push.
+4. ~~Directos en vivo~~ ✅
 5. Selección con IA (Claude / OpenAI / Gemini) con reglas virales y reglas propias.
 6. Editor web táctil.
 7. Publicar: descarga, compartir nativo, Meta, TikTok y Telegram.
