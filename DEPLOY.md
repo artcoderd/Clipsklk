@@ -19,6 +19,13 @@ Todo queda **a tu nombre**: tú creas cada cuenta, tú guardas cada contraseña 
 Nunca compartas estas claves ni las pegues en el código: van solo en el archivo `.env`
 del servidor (que no se sube a GitHub).
 
+## Atajo: instalación automática
+
+En un servidor Ubuntu recién creado, `sudo bash ops/setup-server.sh` instala Docker y el
+cortafuegos, crea `.env` desde `ops/env.production` con contraseñas aleatorias generadas
+en el propio servidor y las claves de notificaciones, detecta si hay GPU, construye y
+arranca. Después solo falta crear tu cuenta de dueño y añadir tus claves con `nano .env`.
+
 ## 1. El servidor
 
 Recomendado: **un solo servidor Linux con GPU NVIDIA** (Ubuntu 22.04/24.04, 8+ GB de VRAM,
